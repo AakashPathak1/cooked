@@ -51,16 +51,19 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="mb-nav">
+    <div className="mb-nav page-enter">
       {/* Header */}
       <div className="sticky top-0 bg-white/95 backdrop-blur-md z-40 px-4 pt-12 pb-3 border-b border-gray-100">
         <h1 className="text-xl font-bold">Activity</h1>
       </div>
 
       <div className="divide-y divide-gray-50">
-        {activities.map((item) => (
+        {activities.map((item, i) => (
           <Link key={item.id} href={`/dish/${item.dishId}`}>
-            <div className="flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 transition-colors">
+            <div
+              className="flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 transition-colors list-enter"
+              style={{ animationDelay: `${i * 35}ms` }}
+            >
               {/* Avatar with type badge */}
               <div className="relative shrink-0">
                 <Avatar className="h-11 w-11">
@@ -105,8 +108,8 @@ export default function NotificationsPage() {
         ))}
 
         {activities.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 gap-3">
-            <p className="text-5xl">🔔</p>
+          <div className="flex flex-col items-center justify-center py-24 gap-3 fade-in">
+            <p className="text-5xl float">🔔</p>
             <p className="text-gray-500 font-medium">No activity yet</p>
             <p className="text-gray-400 text-sm">You'll see likes and comments here</p>
           </div>

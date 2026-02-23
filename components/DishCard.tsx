@@ -76,7 +76,7 @@ export function DishCard({ dish }: DishCardProps) {
   }
 
   return (
-    <div className="bg-white mb-3 rounded-3xl overflow-hidden shadow-sm border border-gray-100 transition-transform active:scale-[0.98]">
+    <div className="bg-white mb-3 rounded-3xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.07)] border border-gray-100/80 transition-all duration-150 active:scale-[0.97] active:shadow-sm">
       {/* Photo */}
       <Link href={`/dish/${dish.id}`}>
         <div className="relative aspect-square bg-gray-100">

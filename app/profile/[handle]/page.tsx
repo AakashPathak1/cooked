@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserByHandle, getPersonalDishes, UserDoc, DishDoc } from "@/lib/firestore";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { eloToRating } from "@/lib/eloDisplay";
+import { eloToRating, scoreColor } from "@/lib/eloDisplay";
 
 type SortMode = "date" | "score";
 
@@ -132,19 +132,24 @@ export default function ProfilePage() {
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-0.5">
-          {sorted.map((dish) => {
+          {sorted.map((dish, i) => {
             const dishScore = dish.globalScore ?? 1200;
             const rating = eloToRating(dishScore);
             return (
               <Link key={dish.id} href={`/dish/${dish.id}`}>
-                <div className="relative aspect-square bg-gray-100 active:opacity-80 transition-opacity">
+                <div
+                  className="relative aspect-square bg-gray-100 active:opacity-75 transition-opacity card-enter"
+                  style={{ animationDelay: `${i * 30}ms` }}
+                >
                   {dish.coverPhotoURL ? (
                     <img src={dish.coverPhotoURL} alt={dish.name} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-2xl">🍽️</div>
                   )}
-                  {/* Beli-style score badge */}
-                  <div className="absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shadow">
+                  <div
+                    className="absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full flex items-center justify-center shadow"
+                    style={{ backgroundColor: scoreColor(dishScore) }}
+                  >
                     <span className="text-white text-[10px] font-bold">{rating}</span>
                   </div>
                 </div>

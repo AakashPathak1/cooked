@@ -380,11 +380,11 @@ export default function DishPage() {
       {/* Likers modal */}
       {showLikersModal && (
         <div
-          className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6"
+          className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 backdrop-enter"
           onClick={() => setShowLikersModal(false)}
         >
           <div
-            className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl"
+            className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl modal-enter"
             style={{ maxHeight: "70vh" }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -425,11 +425,11 @@ export default function DishPage() {
       {/* Quick rate modal — shown when tagged user taps Accept */}
       {showQuickRate && (
         <div
-          className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center"
+          className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center backdrop-enter"
           onClick={() => setShowQuickRate(false)}
         >
           <div
-            className="bg-white rounded-t-3xl w-full max-w-sm pb-10"
+            className="bg-white rounded-t-3xl w-full max-w-sm pb-10 sheet-enter"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 pt-5 pb-1">
@@ -473,11 +473,11 @@ export default function DishPage() {
       {/* Tag editor modal */}
       {editingTags && (
         <div
-          className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6"
+          className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 backdrop-enter"
           onClick={() => { setEditingTags(false); setTagSearch(""); }}
         >
           <div
-            className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl"
+            className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl modal-enter"
             style={{ maxHeight: "75vh" }}
             onClick={(e) => e.stopPropagation()}
           >

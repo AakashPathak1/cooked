@@ -63,7 +63,7 @@ export default function MePage() {
   });
 
   return (
-    <div className="mb-nav">
+    <div className="mb-nav page-enter">
       {/* Header */}
       <div className="sticky top-0 bg-white/90 backdrop-blur-sm z-40 px-4 pt-12 pb-3 border-b border-gray-100">
         <div className="flex items-center justify-between">
@@ -152,8 +152,8 @@ export default function MePage() {
 
       {/* Dish grid */}
       {sorted.length === 0 ? (
-        <div className="text-center py-16 px-4">
-          <p className="text-4xl mb-3">🍽️</p>
+        <div className="text-center py-16 px-4 fade-in">
+          <p className="text-4xl mb-3 float">🍽️</p>
           <p className="font-semibold text-gray-700">No dishes yet</p>
           <p className="text-sm text-gray-400 mt-1">Upload one or get tagged by a friend</p>
           <Link href="/upload">

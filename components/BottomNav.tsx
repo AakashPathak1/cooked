@@ -62,19 +62,26 @@ function NavTab({
   return (
     <Link href={href} className="relative flex flex-col items-center gap-0.5 w-14 py-1">
       <div className="relative">
-        <Icon
-          className={`h-6 w-6 transition-colors ${active ? "text-orange-500" : "text-gray-400"}`}
-          strokeWidth={active ? 2.5 : 2}
-        />
+        <div className={`p-1.5 rounded-2xl transition-all duration-200 ${active ? "bg-orange-50" : ""}`}>
+          <Icon
+            className={`h-5 w-5 transition-all duration-200 ${
+              active ? "text-orange-500 scale-110" : "text-gray-400"
+            }`}
+            strokeWidth={active ? 2.5 : 2}
+          />
+        </div>
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5 badge-enter">
+          <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5 badge-enter">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
       </div>
-      <span className={`text-[10px] font-medium ${active ? "text-orange-500" : "text-gray-400"}`}>
+      <span className={`text-[10px] font-medium transition-colors duration-200 ${active ? "text-orange-500" : "text-gray-400"}`}>
         {label}
       </span>
+      {active && (
+        <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-0.5 rounded-full bg-orange-500 dot-enter" />
+      )}
     </Link>
   );
 }
