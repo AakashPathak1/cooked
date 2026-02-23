@@ -6,10 +6,10 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
-import { getPersonalDishes, DishDoc } from "@/lib/firestore";
+import { getPersonalDishes, getPendingTags, DishDoc } from "@/lib/firestore";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { eloTier, eloToRating } from "@/lib/eloDisplay";
-import { Plus, CalendarDays, Trophy } from "lucide-react";
+import { eloToRating, scoreBgClass } from "@/lib/eloDisplay";
+import { Plus, CalendarDays, Trophy, ChevronRight, Tag } from "lucide-react";
 
 type SortMode = "date" | "elo";
 
@@ -17,6 +17,7 @@ export default function MePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [dishes, setDishes] = useState<DishDoc[]>([]);
+  const [pendingTags, setPendingTags] = useState<DishDoc[]>([]);
   const [fetching, setFetching] = useState(true);
   const [sort, setSort] = useState<SortMode>("date");
 
@@ -26,7 +27,13 @@ export default function MePage() {
 
   useEffect(() => {
     if (!user) return;
-    getPersonalDishes(user.uid).then(setDishes).finally(() => setFetching(false));
+    Promise.all([
+      getPersonalDishes(user.uid),
+      getPendingTags(user.uid),
+    ]).then(([d, p]) => {
+      setDishes(d);
+      setPendingTags(p);
+    }).finally(() => setFetching(false));
   }, [user]);
 
   if (loading || fetching) {
@@ -87,6 +94,39 @@ export default function MePage() {
         <StatBox label="Collabs" value={collaborated} />
       </div>
 
+      {/* Pending tags — dishes tagged in but not yet accepted */}
+      {pendingTags.length > 0 && (
+        <div className="px-4 mb-4">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Tag className="h-3.5 w-3.5 text-orange-500" />
+            <p className="text-sm font-semibold text-gray-700">
+              Incoming tags
+            </p>
+            <span className="ml-auto bg-orange-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+              {pendingTags.length}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {pendingTags.map((dish) => (
+              <Link key={dish.id} href={`/dish/${dish.id}`}>
+                <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl px-3 py-2.5 active:bg-orange-100 transition-colors">
+                  {dish.coverPhotoURL ? (
+                    <img src={dish.coverPhotoURL} alt={dish.name} className="h-12 w-12 rounded-xl object-cover shrink-0" />
+                  ) : (
+                    <div className="h-12 w-12 rounded-xl bg-orange-100 flex items-center justify-center text-xl shrink-0">🍽️</div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm leading-tight truncate">{dish.name}</p>
+                    <p className="text-xs text-orange-500 mt-0.5">Tap to rate &amp; add to your profile</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-orange-400 shrink-0" />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Sort toggle */}
       <div className="px-4 mb-3 flex items-center gap-2">
         <p className="text-sm font-semibold text-gray-700 flex-1">Your dishes</p>
@@ -126,8 +166,8 @@ export default function MePage() {
         <div className="grid grid-cols-3 gap-0.5 px-4">
           {sorted.map((dish) => {
             const score = dish.personalElo ?? dish.globalScore ?? 1200;
-            const tier = eloTier(score);
             const rating = eloToRating(score);
+            const badgeBg = scoreBgClass(score);
             return (
               <Link key={dish.id} href={`/dish/${dish.id}`}>
                 <div className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden">
@@ -136,10 +176,9 @@ export default function MePage() {
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-2xl">🍽️</div>
                   )}
-                  {/* Score badge */}
-                  <div className={`absolute bottom-1 right-1 ${tier.color} rounded-full h-7 w-7 flex flex-col items-center justify-center shadow`}>
-                    <span className="text-white text-[8px] font-bold leading-none">{tier.label}</span>
-                    <span className="text-white text-[7px] leading-none opacity-80">{rating}</span>
+                  {/* Score badge — gradient green→red */}
+                  <div className={`absolute bottom-1 right-1 ${badgeBg} rounded-full h-7 w-7 flex items-center justify-center shadow`}>
+                    <span className="text-white text-[8px] font-bold leading-none">{rating}</span>
                   </div>
                   {/* Role pill */}
                   {dish.role === "tagged" && (

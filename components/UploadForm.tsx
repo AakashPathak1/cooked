@@ -5,16 +5,18 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { getAllUsers, createDish, getPersonalDishes, UserDoc, DishDoc } from "@/lib/firestore";
 import { compressImageToBase64 } from "@/lib/storage";
-import { Camera, X, Lock, Globe } from "lucide-react";
+import { Camera, ImageIcon, X, Lock, Globe } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PairwiseComparison } from "@/components/PairwiseComparison";
+import { QUICK_RATING_OPTIONS, QUICK_RATINGS, QuickRating } from "@/lib/elo";
 
 type Stage = "form" | "ranking";
 
 export function UploadForm() {
   const { user } = useAuth();
   const router = useRouter();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
 
   const [stage, setStage] = useState<Stage>("form");
   const [createdDishId, setCreatedDishId] = useState<string | null>(null);
@@ -28,6 +30,7 @@ export function UploadForm() {
   const [allUsers, setAllUsers] = useState<UserDoc[]>([]);
   const [tagged, setTagged] = useState<string[]>([]);
   const [isPrivate, setIsPrivate] = useState(false);
+  const [quickRating, setQuickRating] = useState<QuickRating | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -51,7 +54,7 @@ export function UploadForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!user || !file || !name.trim()) return;
+    if (!user || !file || !name.trim() || !quickRating) return;
     setLoading(true);
     try {
       const photoURL = await compressImageToBase64(file);
@@ -63,10 +66,27 @@ export function UploadForm() {
         recipeLink: recipeLink.trim(),
         taggedUserIds: tagged,
         isPrivate,
+        initialElo: QUICK_RATINGS[quickRating],
       });
       setCreatedDishId(dishId);
 
-      // Fetch personal dishes to see if there's anything to compare
+      // Notify tagged users (type: "tag")
+      if (tagged.length > 0) {
+        const { createNotification } = await import("@/lib/firestore");
+        await Promise.all(tagged.map((uid) =>
+          createNotification({
+            toUid: uid,
+            fromUid: user.uid,
+            fromDisplayName: user.displayName ?? "Someone",
+            fromPhotoURL: user.photoURL ?? "",
+            type: "tag",
+            dishId,
+            dishName: name.trim(),
+          })
+        ));
+      }
+
+      // Go to ranking if they have ≥2 personal dishes
       const dishes = await getPersonalDishes(user.uid);
       if (dishes.length >= 2) {
         setRankingDishes(dishes);
@@ -82,7 +102,6 @@ export function UploadForm() {
     }
   }
 
-  // After ranking is done, go to the dish page
   function handleRankingComplete() {
     if (createdDishId) router.push(`/dish/${createdDishId}`);
   }
@@ -104,41 +123,59 @@ export function UploadForm() {
     );
   }
 
-  const canSubmit = !!file && name.trim().length > 0 && !loading;
+  const canSubmit = !!file && name.trim().length > 0 && !!quickRating && !loading;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 pb-8">
       {/* Photo picker */}
-      <div
-        className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100 cursor-pointer"
-        onClick={() => fileRef.current?.click()}
-      >
-        {preview ? (
-          <>
-            <img src={preview} alt="preview" className="absolute inset-0 w-full h-full object-cover" />
-            <button
-              type="button"
-              className="absolute top-3 right-3 bg-black/50 rounded-full p-1.5"
-              onClick={(e) => { e.stopPropagation(); setPreview(null); setFile(null); }}
-            >
-              <X className="h-4 w-4 text-white" />
-            </button>
-          </>
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-gray-400">
-            <Camera className="h-10 w-10" />
-            <p className="text-sm font-medium">Tap to add photo</p>
-          </div>
-        )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={handleFile}
-        />
-      </div>
+      {preview ? (
+        <div className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100">
+          <img src={preview} alt="preview" className="absolute inset-0 w-full h-full object-cover" />
+          <button
+            type="button"
+            className="absolute top-3 right-3 bg-black/50 rounded-full p-1.5"
+            onClick={() => { setPreview(null); setFile(null); }}
+          >
+            <X className="h-4 w-4 text-white" />
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => cameraRef.current?.click()}
+            className="aspect-square rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-gray-400 active:bg-gray-50 transition-colors"
+          >
+            <Camera className="h-8 w-8" />
+            <span className="text-sm font-medium">Take photo</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => libraryRef.current?.click()}
+            className="aspect-square rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-gray-400 active:bg-gray-50 transition-colors"
+          >
+            <ImageIcon className="h-8 w-8" />
+            <span className="text-sm font-medium">Choose from library</span>
+          </button>
+          {/* Camera input — forces camera on mobile */}
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleFile}
+          />
+          {/* Library input — opens photo picker on mobile */}
+          <input
+            ref={libraryRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFile}
+          />
+        </div>
+      )}
 
       {/* Dish name */}
       <input
@@ -168,6 +205,28 @@ export function UploadForm() {
         className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-base placeholder-gray-400 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
       />
 
+      {/* Quick rating — required before posting */}
+      <div>
+        <p className="text-sm font-semibold text-gray-700 mb-2.5 px-1">How was it? *</p>
+        <div className="grid grid-cols-2 gap-2">
+          {QUICK_RATING_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => setQuickRating(opt.key)}
+              className={`flex items-center gap-2.5 px-4 py-3 rounded-2xl border-2 transition-all text-left ${
+                quickRating === opt.key
+                  ? "border-orange-500 bg-orange-50 text-orange-700"
+                  : "border-gray-200 bg-white text-gray-600 active:bg-gray-50"
+              }`}
+            >
+              <span className="text-xl">{opt.emoji}</span>
+              <span className="text-sm font-medium leading-tight">{opt.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Privacy toggle */}
       <button
         type="button"
@@ -192,7 +251,7 @@ export function UploadForm() {
       {/* Tag friends */}
       {allUsers.length > 0 && (
         <div>
-          <p className="text-sm font-semibold text-gray-700 mb-2 px-1">Tag friends to rate this</p>
+          <p className="text-sm font-semibold text-gray-700 mb-2 px-1">Tag friends</p>
           <div className="flex flex-wrap gap-2">
             {allUsers.map((u) => (
               <button

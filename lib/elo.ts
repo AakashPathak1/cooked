@@ -24,4 +24,22 @@ export function calculateElo(winnerElo: number, loserElo: number): EloResult {
   };
 }
 
+// Quick initial rating anchors — asked when posting or accepting a tag.
+// Maps to a 0–10 display score: loved=9.0, good=7.0, okay=5.0, meh=2.5
+export const QUICK_RATINGS = {
+  loved: 1360, // → 9.0
+  good:  1280, // → 7.0
+  okay:  1200, // → 5.0
+  meh:   1100, // → 2.5
+} as const;
+
+export type QuickRating = keyof typeof QUICK_RATINGS;
+
+export const QUICK_RATING_OPTIONS: { key: QuickRating; emoji: string; label: string }[] = [
+  { key: "loved", emoji: "🤩", label: "Loved it" },
+  { key: "good",  emoji: "😊", label: "Pretty good" },
+  { key: "okay",  emoji: "😐", label: "It was okay" },
+  { key: "meh",   emoji: "😕", label: "Didn't love it" },
+];
+
 export { DEFAULT_RATING };

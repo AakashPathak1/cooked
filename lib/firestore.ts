@@ -134,7 +134,10 @@ export async function createDish(data: {
   recipeLink: string;
   taggedUserIds: string[];
   isPrivate?: boolean;
+  initialElo?: number;
 }): Promise<string> {
+  const initialElo = data.initialElo ?? DEFAULT_RATING;
+
   // Create dish doc — no photoURL directly on dish
   const ref = await addDoc(collection(db, "dishes"), {
     creatorId: data.creatorId,
@@ -143,7 +146,7 @@ export async function createDish(data: {
     recipeLink: data.recipeLink,
     taggedUserIds: data.taggedUserIds,
     isPrivate: data.isPrivate ?? false,
-    globalScore: DEFAULT_RATING,
+    globalScore: initialElo,
     coverPhotoURL: "",
     createdAt: serverTimestamp(),
     likesCount: 0,
@@ -160,25 +163,12 @@ export async function createDish(data: {
     setDoc(doc(db, "userDishElos", `${data.creatorId}_${dishId}`), {
       userId: data.creatorId,
       dishId,
-      elo: DEFAULT_RATING,
+      elo: initialElo,
     }),
   ]);
 
-  // Tagged users: userDishes + userDishElos
-  await Promise.all(
-    data.taggedUserIds.flatMap((uid) => [
-      setDoc(doc(db, "userDishes", `${uid}_${dishId}`), {
-        userId: uid,
-        dishId,
-        role: "tagged",
-      }),
-      setDoc(doc(db, "userDishElos", `${uid}_${dishId}`), {
-        userId: uid,
-        dishId,
-        elo: DEFAULT_RATING,
-      }),
-    ])
-  );
+  // Tagged users get NO userDishes/userDishElos until they accept the tag.
+  // Notifications are sent by the caller after this returns.
 
   // Create initial dishLog with the creator's photo → sets coverPhotoURL
   await createDishLog(dishId, data.creatorId, data.photoURL, data.notes, false);
@@ -297,43 +287,52 @@ export async function createDishLog(
   // Update dish's coverPhotoURL to latest
   await updateDoc(doc(db, "dishes", dishId), { coverPhotoURL: photoURL });
 
-  if (upsertUserDish) {
-    // Add to user's personal list if not already there
-    const udRef = doc(db, "userDishes", `${userId}_${dishId}`);
-    const udSnap = await getDoc(udRef);
-    if (!udSnap.exists()) {
-      await setDoc(udRef, { userId, dishId, role: "tried" });
-    }
-
-    // Init personal ELO if not already there
-    const eloRef = doc(db, "userDishElos", `${userId}_${dishId}`);
-    const eloSnap = await getDoc(eloRef);
-    if (!eloSnap.exists()) {
-      await setDoc(eloRef, { userId, dishId, elo: DEFAULT_RATING });
-    }
-
-    // Tag the user on the dish doc if not already tagged / creator
-    const dishSnap = await getDoc(doc(db, "dishes", dishId));
-    if (dishSnap.exists()) {
-      const tagged: string[] = dishSnap.data().taggedUserIds ?? [];
-      const creatorId: string = dishSnap.data().creatorId;
-      if (userId !== creatorId && !tagged.includes(userId)) {
-        await updateDoc(doc(db, "dishes", dishId), {
-          taggedUserIds: arrayUnion(userId),
-        });
-      }
-    }
-  }
-
   return ref.id;
 }
 
-// Delete a single dish log (any user can delete their own log)
-// Returns true if the user was untagged from the dish (no more logs + was "tried")
-export async function deleteDishLog(logId: string, dishId: string, requestingUid: string): Promise<{ wasUntagged: boolean }> {
+// Called when a tagged user accepts the tag. initialElo is their quick rating anchor.
+export async function acceptTag(uid: string, dishId: string, initialElo: number = DEFAULT_RATING): Promise<void> {
+  await Promise.all([
+    setDoc(doc(db, "userDishes", `${uid}_${dishId}`), { userId: uid, dishId, role: "tagged" }),
+    setDoc(doc(db, "userDishElos", `${uid}_${dishId}`), { userId: uid, dishId, elo: initialElo }),
+  ]);
+  // Recompute global score to reflect this user's rating
+  await recomputeGlobalScore(dishId);
+}
+
+// Owner edits the tagged users list. Returns newly added UIDs so caller can notify them.
+export async function updateDishTags(
+  dishId: string,
+  ownerUid: string,
+  newTaggedUserIds: string[]
+): Promise<string[]> {
+  const dishRef = doc(db, "dishes", dishId);
+  const dishSnap = await getDoc(dishRef);
+  if (!dishSnap.exists()) return [];
+  if (dishSnap.data().creatorId !== ownerUid) throw new Error("Not authorized");
+
+  const oldTagged: string[] = dishSnap.data().taggedUserIds ?? [];
+  const added = newTaggedUserIds.filter((uid) => !oldTagged.includes(uid));
+  const removed = oldTagged.filter((uid) => !newTaggedUserIds.includes(uid));
+
+  await updateDoc(dishRef, { taggedUserIds: newTaggedUserIds });
+
+  // Delete removed users' records (if they had accepted)
+  await Promise.all(
+    removed.flatMap((uid) => [
+      deleteDoc(doc(db, "userDishes", `${uid}_${dishId}`)),
+      deleteDoc(doc(db, "userDishElos", `${uid}_${dishId}`)),
+    ])
+  );
+
+  return added; // caller sends notifications to these
+}
+
+// Delete a dish log — only the dish owner can call this now
+export async function deleteDishLog(logId: string, dishId: string, requestingUid: string): Promise<void> {
   const logRef = doc(db, "dishLogs", logId);
   const logSnap = await getDoc(logRef);
-  if (!logSnap.exists()) return { wasUntagged: false };
+  if (!logSnap.exists()) return;
   if (logSnap.data().userId !== requestingUid) throw new Error("Not authorized");
 
   await deleteDoc(logRef);
@@ -350,24 +349,6 @@ export async function deleteDishLog(logId: string, dishId: string, requestingUid
     .sort((a, b) => b.ts - a.ts);
   const newCover = sorted[0]?.photoURL ?? "";
   await updateDoc(doc(db, "dishes", dishId), { coverPhotoURL: newCover });
-
-  // Untag if user has no remaining logs AND their role is "tried"
-  // (explicitly tagged users keep their tag even if they have no photos)
-  const userRemainingLogs = remainingSnap.docs.filter((d) => d.data().userId === requestingUid);
-  if (userRemainingLogs.length === 0) {
-    const udRef = doc(db, "userDishes", `${requestingUid}_${dishId}`);
-    const udSnap = await getDoc(udRef);
-    if (udSnap.exists() && udSnap.data().role === "tried") {
-      await Promise.all([
-        updateDoc(doc(db, "dishes", dishId), { taggedUserIds: arrayRemove(requestingUid) }),
-        deleteDoc(udRef),
-        deleteDoc(doc(db, "userDishElos", `${requestingUid}_${dishId}`)),
-      ]);
-      return { wasUntagged: true };
-    }
-  }
-
-  return { wasUntagged: false };
 }
 
 export async function getDishLogs(dishId: string): Promise<DishLogDoc[]> {
@@ -381,7 +362,7 @@ export async function getDishLogs(dishId: string): Promise<DishLogDoc[]> {
 
 // ─── ELO Updates ─────────────────────────────────────────────────────────────
 
-async function recomputeGlobalScore(dishId: string) {
+export async function recomputeGlobalScore(dishId: string) {
   const q = query(collection(db, "userDishElos"), where("dishId", "==", dishId));
   const snaps = await getDocs(q);
   if (snaps.empty) return;
@@ -460,11 +441,31 @@ export async function getLikers(dishId: string): Promise<{ users: UserDoc[]; tot
   return { users: resolved.filter(Boolean) as UserDoc[], total };
 }
 
+// Returns dishes where uid is in taggedUserIds but hasn't accepted yet (no userDishes record).
+export async function getPendingTags(uid: string): Promise<DishDoc[]> {
+  const q = query(
+    collection(db, "dishes"),
+    where("taggedUserIds", "array-contains", uid)
+  );
+  const snaps = await getDocs(q);
+  const allTagged = snaps.docs.map((d) => ({ id: d.id, ...d.data() } as DishDoc));
+
+  const pending: DishDoc[] = [];
+  await Promise.all(
+    allTagged.map(async (dish) => {
+      if (dish.creatorId === uid) return; // skip own dishes
+      const udSnap = await getDoc(doc(db, "userDishes", `${uid}_${dish.id}`));
+      if (!udSnap.exists()) pending.push(dish);
+    })
+  );
+  return pending;
+}
+
 // ─── Activity feed ────────────────────────────────────────────────────────────
 
 export interface ActivityItem {
   id: string;
-  type: "like" | "comment" | "tried";
+  type: NotificationType;
   fromUid: string;
   fromDisplayName: string;
   fromPhotoURL: string;
@@ -602,13 +603,15 @@ export async function getComments(dishId: string): Promise<CommentDoc[]> {
 
 // ─── Notifications ────────────────────────────────────────────────────────────
 
+export type NotificationType = "like" | "comment" | "tried" | "tag" | "accepted";
+
 export interface NotificationDoc {
   id: string;
   toUid: string;
   fromUid: string;
   fromDisplayName: string;
   fromPhotoURL: string;
-  type: "like" | "comment" | "tried";
+  type: NotificationType;
   dishId: string;
   dishName: string;
   read: boolean;
@@ -620,7 +623,7 @@ export async function createNotification(data: {
   fromUid: string;
   fromDisplayName: string;
   fromPhotoURL: string;
-  type: "like" | "comment" | "tried";
+  type: NotificationType;
   dishId: string;
   dishName: string;
 }): Promise<void> {

@@ -9,11 +9,13 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   getDish,
   getDishLogs,
-  createDishLog,
   deleteDishLog,
   deleteDish,
   updateDishPrivacy,
+  updateDishTags,
+  acceptTag,
   getPersonalDishes,
+  getAllUsers,
   getComments,
   addComment,
   toggleLike,
@@ -26,20 +28,19 @@ import {
   CommentDoc,
   UserDoc,
 } from "@/lib/firestore";
-import { compressImageToBase64 } from "@/lib/storage";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Heart, ExternalLink, Send, ChevronLeft,
-  Camera, Trash2, Lock, Globe, Plus, X,
+  Trash2, Lock, Globe, X, Pencil, Check,
 } from "lucide-react";
-import { eloToRating } from "@/lib/eloDisplay";
+import { eloToRating, scoreBgClass } from "@/lib/eloDisplay";
+import { QUICK_RATING_OPTIONS, QUICK_RATINGS, QuickRating } from "@/lib/elo";
 import { PairwiseComparison } from "@/components/PairwiseComparison";
 
 export default function DishPage() {
   const { id } = useParams<{ id: string }>();
   const { user, loading } = useAuth();
   const router = useRouter();
-  const tryFileRef = useRef<HTMLInputElement>(null);
 
   const [dish, setDish] = useState<DishDoc | null>(null);
   const [creator, setCreator] = useState<UserDoc | null>(null);
@@ -55,13 +56,24 @@ export default function DishPage() {
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [fetching, setFetching] = useState(true);
-  const [tryLoading, setTryLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [rankingDishes, setRankingDishes] = useState<DishDoc[]>([]);
   const [showRanking, setShowRanking] = useState(false);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const photoScrollRef = useRef<HTMLDivElement>(null);
   const commentsRef = useRef<HTMLDivElement>(null);
+
+  // Tag editor state
+  const [editingTags, setEditingTags] = useState(false);
+  const [allUsers, setAllUsers] = useState<UserDoc[]>([]);
+  const [pendingTagIds, setPendingTagIds] = useState<string[]>([]);
+  const [savingTags, setSavingTags] = useState(false);
+
+  // Accept tag state
+  const [isTagPending, setIsTagPending] = useState(false);
+  const [showQuickRate, setShowQuickRate] = useState(false);
+  const [selectedQuickRate, setSelectedQuickRate] = useState<QuickRating | null>(null);
+  const [accepting, setAccepting] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
@@ -90,20 +102,27 @@ export default function DishPage() {
 
       // Fetch tagged users
       const tagged = await Promise.all(d.taggedUserIds.map((uid: string) => getUserByUid(uid)));
-      setTaggedUsers(tagged.filter(Boolean) as UserDoc[]);
+      const resolvedTagged = tagged.filter(Boolean) as UserDoc[];
+      setTaggedUsers(resolvedTagged);
 
-      // Fetch comment + log users
+      // Check if current user is tagged but hasn't accepted yet
+      if (d.taggedUserIds.includes(user.uid) && d.creatorId !== user.uid) {
+        const { getDoc, doc } = await import("firebase/firestore");
+        const { db } = await import("@/lib/firebase");
+        const udSnap = await getDoc(doc(db, "userDishes", `${user.uid}_${d.id}`));
+        setIsTagPending(!udSnap.exists());
+      }
+
+      // Fetch log users
       const allUids = Array.from(new Set([
         ...commentsData.map((c) => c.userId),
         ...logsData.map((l) => l.userId),
       ]));
       const userMap: Record<string, UserDoc> = {};
-      await Promise.all(
-        allUids.map(async (uid) => {
-          const u = await getUserByUid(uid);
-          if (u) userMap[uid] = u;
-        })
-      );
+      await Promise.all(allUids.map(async (uid) => {
+        const u = await getUserByUid(uid);
+        if (u) userMap[uid] = u;
+      }));
       setCommentUsers(userMap);
       setLogUsers(userMap);
       setFetching(false);
@@ -144,7 +163,7 @@ export default function DishPage() {
     if (!dish) return;
     const { users, total } = await getLikers(dish.id);
     setLikers(users);
-    setLikesCount(total); // sync with actual like-doc count
+    setLikesCount(total);
     setShowLikersModal(true);
   }
 
@@ -181,94 +200,20 @@ export default function DishPage() {
         }),
       }).catch(() => {});
     }
-  }
-
-  async function handleTry(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f || !user || !dish) return;
-    setTryLoading(true);
-    try {
-      const photoURL = await compressImageToBase64(f);
-      await createDishLog(dish.id, user.uid, photoURL);
-      const [updatedLogs, personal, u] = await Promise.all([
-        getDishLogs(dish.id),
-        getPersonalDishes(user.uid),
-        getUserByUid(user.uid),
-      ]);
-      setLogs(updatedLogs);
-      if (u) {
-        setLogUsers((m) => ({ ...m, [user.uid]: u }));
-        // Add to tagged users display if not already listed
-        setTaggedUsers((prev) => {
-          if (prev.some((p) => p.uid === user.uid)) return prev;
-          return [...prev, u];
-        });
-        setDish((d) => d ? {
-          ...d,
-          coverPhotoURL: photoURL,
-          taggedUserIds: d.taggedUserIds.includes(user.uid)
-            ? d.taggedUserIds
-            : [...d.taggedUserIds, user.uid],
-        } : d);
-      }
-
-      // Notify dish owner that someone tried their dish
-      if (dish.creatorId !== user.uid) {
-        const fromUser = u ?? await getUserByUid(user.uid);
-        await createNotification({
-          toUid: dish.creatorId,
-          fromUid: user.uid,
-          fromDisplayName: fromUser?.displayName ?? "Someone",
-          fromPhotoURL: fromUser?.photoURL ?? "",
-          type: "tried",
-          dishId: dish.id,
-          dishName: dish.name,
-        });
-        fetch("/api/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            toUid: dish.creatorId,
-            title: "🍳 Cooked",
-            body: `${fromUser?.displayName ?? "Someone"} tried your dish "${dish.name}"`,
-            url: `/dish/${dish.id}`,
-          }),
-        }).catch(() => {});
-      }
-
-      if (personal.length >= 2) {
-        setRankingDishes(personal);
-        setShowRanking(true);
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Failed to add your photo. Please try again.");
-    } finally {
-      setTryLoading(false);
-      e.target.value = "";
-    }
+    // Ensure new commenter is in commentUsers
+    const u = await getUserByUid(user.uid);
+    if (u) setCommentUsers((m) => ({ ...m, [user.uid]: u }));
   }
 
   async function handleDeleteLog(logId: string) {
     if (!user || !dish) return;
-    if (!confirm("Remove your photo from this dish?")) return;
+    if (!confirm("Remove this photo?")) return;
     try {
-      const { wasUntagged } = await deleteDishLog(logId, dish.id, user.uid);
+      await deleteDishLog(logId, dish.id, user.uid);
       const updatedLogs = await getDishLogs(dish.id);
-      // Cover = most recent remaining log (getDishLogs sorts asc, so last = newest)
       const newCover = updatedLogs[updatedLogs.length - 1]?.photoURL ?? "";
       setLogs(updatedLogs);
-      setDish((d) => {
-        if (!d) return d;
-        const next: typeof d = { ...d, coverPhotoURL: newCover };
-        if (wasUntagged) {
-          next.taggedUserIds = d.taggedUserIds.filter((id) => id !== user.uid);
-        }
-        return next;
-      });
-      if (wasUntagged) {
-        setTaggedUsers((prev) => prev.filter((u) => u.uid !== user!.uid));
-      }
+      setDish((d) => d ? { ...d, coverPhotoURL: newCover } : d);
     } catch (err) {
       console.error(err);
       alert("Failed to remove photo.");
@@ -296,6 +241,94 @@ export default function DishPage() {
     setDish((d) => d ? { ...d, isPrivate: next } : d);
   }
 
+  // ── Accept tag ──────────────────────────────────────────────────────────────
+  async function handleAcceptTag() {
+    if (!user || !dish || !selectedQuickRate) return;
+    setAccepting(true);
+    setShowQuickRate(false);
+    try {
+      const initialElo = QUICK_RATINGS[selectedQuickRate];
+      await acceptTag(user.uid, dish.id, initialElo);
+      setIsTagPending(false);
+      // Notify dish owner
+      const fromUser = await getUserByUid(user.uid);
+      await createNotification({
+        toUid: dish.creatorId,
+        fromUid: user.uid,
+        fromDisplayName: fromUser?.displayName ?? "Someone",
+        fromPhotoURL: fromUser?.photoURL ?? "",
+        type: "accepted",
+        dishId: dish.id,
+        dishName: dish.name,
+      });
+      fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toUid: dish.creatorId,
+          title: "🍳 Cooked",
+          body: `${fromUser?.displayName ?? "Someone"} accepted your tag on "${dish.name}"`,
+          url: `/dish/${dish.id}`,
+        }),
+      }).catch(() => {});
+      // Trigger pairwise ranking if they have ≥2 personal dishes
+      const personal = await getPersonalDishes(user.uid);
+      if (personal.length >= 2) {
+        setRankingDishes(personal);
+        setShowRanking(true);
+      }
+    } finally {
+      setAccepting(false);
+      setSelectedQuickRate(null);
+    }
+  }
+
+  // ── Tag editor ──────────────────────────────────────────────────────────────
+  async function handleOpenTagEditor() {
+    if (!dish) return;
+    const users = await getAllUsers();
+    setAllUsers(users.filter((u) => u.uid !== dish.creatorId));
+    setPendingTagIds(dish.taggedUserIds ?? []);
+    setEditingTags(true);
+  }
+
+  async function handleSaveTags() {
+    if (!user || !dish) return;
+    setSavingTags(true);
+    try {
+      const addedUids = await updateDishTags(dish.id, user.uid, pendingTagIds);
+      // Notify newly tagged users
+      await Promise.all(addedUids.map(async (uid) => {
+        await createNotification({
+          toUid: uid,
+          fromUid: user.uid,
+          fromDisplayName: user.displayName ?? "Someone",
+          fromPhotoURL: user.photoURL ?? "",
+          type: "tag",
+          dishId: dish.id,
+          dishName: dish.name,
+        });
+        fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toUid: uid,
+            title: "🍳 Cooked",
+            body: `${user.displayName ?? "Someone"} tagged you in "${dish.name}"`,
+            url: `/dish/${dish.id}`,
+          }),
+        }).catch(() => {});
+      }));
+      // Update local state
+      setDish((d) => d ? { ...d, taggedUserIds: pendingTagIds } : d);
+      const resolved = await Promise.all(pendingTagIds.map((uid) => getUserByUid(uid)));
+      setTaggedUsers(resolved.filter(Boolean) as UserDoc[]);
+      setEditingTags(false);
+    } finally {
+      setSavingTags(false);
+    }
+  }
+
   if (loading || fetching) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -313,8 +346,8 @@ export default function DishPage() {
   }
 
   const score = dish.globalScore ?? 1200;
+  const badgeBg = scoreBgClass(score);
   const isOwner = user?.uid === dish.creatorId;
-  const alreadyLogged = logs.some((l) => l.userId === user?.uid);
 
   // Ranking overlay
   if (showRanking) {
@@ -343,7 +376,7 @@ export default function DishPage() {
 
   return (
     <>
-      {/* Likers modal — centered dialog, z-[60] above z-50 bottom nav */}
+      {/* Likers modal */}
       {showLikersModal && (
         <div
           className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6"
@@ -354,7 +387,6 @@ export default function DishPage() {
             style={{ maxHeight: "70vh" }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header — never scrolls */}
             <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
               <h2 className="font-bold text-base">
                 {likesCount} like{likesCount !== 1 ? "s" : ""}
@@ -363,7 +395,6 @@ export default function DishPage() {
                 <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
-            {/* Scrollable list — min-h-0 lets flex-1 shrink below content height */}
             <div className="overflow-y-auto flex-1 min-h-0">
               {likers.length === 0 ? (
                 <p className="text-center text-gray-400 py-10 text-sm">No likes yet</p>
@@ -390,6 +421,108 @@ export default function DishPage() {
         </div>
       )}
 
+      {/* Quick rate modal — shown when tagged user taps Accept */}
+      {showQuickRate && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center"
+          onClick={() => setShowQuickRate(false)}
+        >
+          <div
+            className="bg-white rounded-t-3xl w-full max-w-sm pb-10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 pt-5 pb-1">
+              <div>
+                <h2 className="font-bold text-base">How was this dish?</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Your rating anchors your starting score</p>
+              </div>
+              <button onClick={() => setShowQuickRate(false)} className="p-1 -mr-1">
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 p-4">
+              {QUICK_RATING_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setSelectedQuickRate(opt.key)}
+                  className={`flex items-center gap-2.5 px-4 py-3 rounded-2xl border-2 transition-all text-left ${
+                    selectedQuickRate === opt.key
+                      ? "border-orange-500 bg-orange-50 text-orange-700"
+                      : "border-gray-200 bg-white text-gray-600"
+                  }`}
+                >
+                  <span className="text-2xl">{opt.emoji}</span>
+                  <span className="text-sm font-medium leading-tight">{opt.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="px-4">
+              <button
+                onClick={handleAcceptTag}
+                disabled={!selectedQuickRate || accepting}
+                className="w-full py-3.5 bg-orange-500 text-white font-semibold rounded-2xl text-sm disabled:opacity-40 active:scale-95 transition-all"
+              >
+                {accepting ? "Adding to profile…" : "Accept & add to profile"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tag editor modal */}
+      {editingTags && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6"
+          onClick={() => setEditingTags(false)}
+        >
+          <div
+            className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl"
+            style={{ maxHeight: "75vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
+              <h2 className="font-bold text-base">Edit tags</h2>
+              <button onClick={() => setEditingTags(false)} className="p-1 -mr-1">
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 min-h-0 p-4">
+              <div className="flex flex-wrap gap-2">
+                {allUsers.map((u) => {
+                  const selected = pendingTagIds.includes(u.uid);
+                  return (
+                    <button
+                      key={u.uid}
+                      onClick={() => setPendingTagIds((prev) =>
+                        selected ? prev.filter((id) => id !== u.uid) : [...prev, u.uid]
+                      )}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium border transition-colors ${
+                        selected ? "bg-orange-500 text-white border-orange-500" : "bg-white text-gray-700 border-gray-200"
+                      }`}
+                    >
+                      <Avatar className="h-5 w-5">
+                        <AvatarImage src={u.photoURL} />
+                        <AvatarFallback className="text-[10px]">{(u.displayName || u.handle)[0]}</AvatarFallback>
+                      </Avatar>
+                      {u.displayName || u.handle}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-100 shrink-0">
+              <button
+                onClick={handleSaveTags}
+                disabled={savingTags}
+                className="w-full py-3 bg-orange-500 text-white font-semibold rounded-2xl text-sm disabled:opacity-50"
+              >
+                {savingTags ? "Saving…" : "Save tags"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-nav">
         {/* Photo scroll */}
         <div className="relative">
@@ -399,13 +532,11 @@ export default function DishPage() {
               className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
               onScroll={(e) => {
                 const el = e.currentTarget;
-                const idx = Math.round(el.scrollLeft / el.offsetWidth);
-                setCurrentPhotoIndex(idx);
+                setCurrentPhotoIndex(Math.round(el.scrollLeft / el.offsetWidth));
               }}
             >
               {logs.map((log) => {
                 const uploader = logUsers[log.userId];
-                const isMyLog = log.userId === user?.uid;
                 return (
                   <div key={log.id} className="relative shrink-0 w-full aspect-square bg-gray-100 snap-start">
                     <img src={log.photoURL} alt={dish.name} className="w-full h-full object-cover" />
@@ -416,8 +547,7 @@ export default function DishPage() {
                           <AvatarFallback className="text-[8px]">{uploader.displayName?.[0]}</AvatarFallback>
                         </Avatar>
                         <span className="text-white text-xs font-medium">{uploader.displayName}</span>
-                        {/* Delete own log inline with uploader pill — avoids collision with ELO badge */}
-                        {isMyLog && !isOwner && (
+                        {isOwner && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteLog(log.id!); }}
                             className="ml-0.5 p-0.5 rounded-full hover:bg-white/20 active:bg-white/30 transition-colors"
@@ -435,7 +565,6 @@ export default function DishPage() {
             <div className="aspect-square bg-gray-100 flex items-center justify-center text-7xl">🍽️</div>
           )}
 
-          {/* Back */}
           <button
             onClick={() => router.back()}
             className="absolute top-12 left-4 bg-black/40 backdrop-blur-sm rounded-full p-2"
@@ -443,8 +572,7 @@ export default function DishPage() {
             <ChevronLeft className="h-5 w-5 text-white" />
           </button>
 
-          {/* Score badge */}
-          <div className="absolute top-12 right-4 bg-orange-500 rounded-full h-12 w-12 flex items-center justify-center shadow-lg shadow-orange-200">
+          <div className={`absolute top-12 right-4 ${badgeBg} rounded-full h-12 w-12 flex items-center justify-center shadow-lg`}>
             <span className="text-white text-sm font-bold">{eloToRating(score)}</span>
           </div>
 
@@ -454,14 +582,10 @@ export default function DishPage() {
                 <button
                   key={i}
                   onClick={() => {
-                    photoScrollRef.current?.scrollTo({ left: i * photoScrollRef.current.offsetWidth, behavior: "smooth" });
+                    photoScrollRef.current?.scrollTo({ left: i * photoScrollRef.current!.offsetWidth, behavior: "smooth" });
                     setCurrentPhotoIndex(i);
                   }}
-                  className={`rounded-full transition-all duration-200 ${
-                    i === currentPhotoIndex
-                      ? "w-4 h-2 bg-white"
-                      : "w-2 h-2 bg-white/50"
-                  }`}
+                  className={`rounded-full transition-all duration-200 ${i === currentPhotoIndex ? "w-4 h-2 bg-white" : "w-2 h-2 bg-white/50"}`}
                 />
               ))}
             </div>
@@ -493,39 +617,73 @@ export default function DishPage() {
             )}
           </div>
 
-          {/* Owner + Tagged people */}
-          <div className="space-y-2">
-            {creator && (
-              <div className="flex items-center gap-2">
-                <Link href={`/profile/${creator.handle}`} className="flex items-center gap-2 group">
-                  <Avatar className="h-8 w-8 ring-2 ring-white">
-                    <AvatarImage src={creator.photoURL} />
-                    <AvatarFallback className="bg-orange-100 text-orange-600 text-xs">{creator.displayName?.[0]}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="text-sm font-semibold group-hover:underline">{creator.displayName}</p>
-                    <p className="text-[10px] text-gray-400">Creator</p>
-                  </div>
-                </Link>
+          {/* Creator */}
+          {creator && (
+            <Link href={`/profile/${creator.handle}`} className="flex items-center gap-2 group w-fit">
+              <Avatar className="h-8 w-8 ring-2 ring-white">
+                <AvatarImage src={creator.photoURL} />
+                <AvatarFallback className="bg-orange-100 text-orange-600 text-xs">{creator.displayName?.[0]}</AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-sm font-semibold group-hover:underline">{creator.displayName}</p>
+                <p className="text-[10px] text-gray-400">Creator</p>
               </div>
-            )}
-            {taggedUsers.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-gray-400 shrink-0">Tagged:</span>
-                {taggedUsers.map((u) => (
+            </Link>
+          )}
+
+          {/* Tagged people + edit button */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400">Tagged</span>
+              {isOwner && (
+                <button
+                  onClick={handleOpenTagEditor}
+                  className="p-1 rounded-full bg-gray-100 active:bg-gray-200 transition-colors"
+                >
+                  <Pencil className="h-3 w-3 text-gray-400" />
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {taggedUsers.length === 0 && (
+                <span className="text-xs text-gray-300 italic">No one tagged</span>
+              )}
+              {taggedUsers.map((u) => {
+                // Check if this user has accepted (has a userDishes record)
+                const hasAccepted = !(u.uid === user?.uid && isTagPending);
+                return (
                   <Link key={u.uid} href={`/profile/${u.handle}`}>
-                    <div className="flex items-center gap-1.5 bg-gray-100 rounded-full px-2.5 py-1 active:bg-gray-200 transition-colors">
+                    <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 active:opacity-70 transition-opacity ${hasAccepted ? "bg-gray-100" : "bg-orange-50 border border-orange-200"}`}>
                       <Avatar className="h-4 w-4">
                         <AvatarImage src={u.photoURL} />
                         <AvatarFallback className="text-[8px]">{u.displayName?.[0]}</AvatarFallback>
                       </Avatar>
                       <span className="text-xs font-medium">{u.displayName}</span>
+                      {!hasAccepted && <span className="text-[9px] text-orange-400 font-medium">pending</span>}
                     </div>
                   </Link>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
           </div>
+
+          {/* Accept tag banner */}
+          {isTagPending && !isOwner && (
+            <div className="flex items-center justify-between bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-orange-700">You've been tagged!</p>
+                <p className="text-xs text-orange-400 mt-0.5">Rate it to add this dish to your profile</p>
+              </div>
+              <button
+                onClick={() => setShowQuickRate(true)}
+                disabled={accepting}
+                className="flex items-center gap-1.5 bg-orange-500 text-white text-sm font-semibold rounded-full px-4 py-2 active:scale-95 transition-transform disabled:opacity-50"
+              >
+                <Check className="h-4 w-4" />
+                {accepting ? "Adding…" : "Rate & accept"}
+              </button>
+            </div>
+          )}
 
           {dish.notes && (
             <p className="text-gray-600 text-sm leading-relaxed">{dish.notes}</p>
@@ -544,7 +702,6 @@ export default function DishPage() {
 
           {/* Actions row */}
           <div className="flex items-center gap-4 py-1">
-            {/* Like + count (count is tappable for modal) */}
             <button onClick={handleLike} className="flex items-center gap-1.5 group">
               <Heart className={`h-6 w-6 transition-all duration-150 ${liked ? "fill-red-500 text-red-500 scale-110" : "text-gray-400"}`} />
             </button>
@@ -553,43 +710,6 @@ export default function DishPage() {
                 {likesCount} like{likesCount !== 1 ? "s" : ""}
               </button>
             ) : null}
-
-            {/* Try this dish */}
-            {!alreadyLogged && !isOwner && (
-              <button
-                onClick={() => tryFileRef.current?.click()}
-                disabled={tryLoading}
-                className="ml-auto flex items-center gap-1.5 bg-orange-50 border border-orange-200 rounded-full px-4 py-2 active:bg-orange-100 transition-colors"
-              >
-                <Camera className="h-4 w-4 text-orange-500" />
-                <span className="text-sm font-semibold text-orange-600">
-                  {tryLoading ? "Adding…" : "I tried this dish"}
-                </span>
-              </button>
-            )}
-
-            {/* Add another photo */}
-            {alreadyLogged && (
-              <button
-                onClick={() => tryFileRef.current?.click()}
-                disabled={tryLoading}
-                className="ml-auto flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-4 py-2 active:bg-gray-100 transition-colors"
-              >
-                <Plus className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-semibold text-gray-600">
-                  {tryLoading ? "Adding…" : "Add photo"}
-                </span>
-              </button>
-            )}
-
-            <input
-              ref={tryFileRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={handleTry}
-            />
           </div>
 
           {dish.isPrivate && (
@@ -605,11 +725,9 @@ export default function DishPage() {
             <h2 className="font-bold text-base">
               {comments.length > 0 ? `${comments.length} comment${comments.length !== 1 ? "s" : ""}` : "Comments"}
             </h2>
-
             {comments.length === 0 && (
               <p className="text-sm text-gray-400">No comments yet. Be the first!</p>
             )}
-
             {comments.map((comment) => {
               const commentUser = commentUsers[comment.userId];
               return (
@@ -625,8 +743,6 @@ export default function DishPage() {
                 </div>
               );
             })}
-
-            {/* Comment input */}
             <form onSubmit={handleComment} className="flex gap-2 items-end pt-1">
               <Avatar className="h-7 w-7 shrink-0">
                 <AvatarImage src={user?.photoURL ?? ""} />

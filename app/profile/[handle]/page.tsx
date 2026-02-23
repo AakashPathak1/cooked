@@ -133,7 +133,7 @@ export default function ProfilePage() {
       ) : (
         <div className="grid grid-cols-3 gap-0.5">
           {sorted.map((dish) => {
-            const dishScore = dish.personalElo ?? dish.globalScore ?? 1200;
+            const dishScore = dish.globalScore ?? 1200;
             const rating = eloToRating(dishScore);
             return (
               <Link key={dish.id} href={`/dish/${dish.id}`}>
