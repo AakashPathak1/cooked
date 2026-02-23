@@ -12,7 +12,7 @@ import {
   ActivityItem,
 } from "@/lib/firestore";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Heart, MessageCircle } from "lucide-react";
+import { Heart, MessageCircle, UtensilsCrossed } from "lucide-react";
 
 function timeAgo(timestamp: ActivityItem["createdAt"]): string {
   if (!timestamp) return "";
@@ -69,9 +69,11 @@ export default function NotificationsPage() {
                     {item.fromDisplayName?.[0] ?? "?"}
                   </AvatarFallback>
                 </Avatar>
-                <div className={`absolute -bottom-0.5 -right-0.5 rounded-full p-1 ${item.type === "like" ? "bg-red-500" : "bg-orange-500"}`}>
+                <div className={`absolute -bottom-0.5 -right-0.5 rounded-full p-1 ${item.type === "like" ? "bg-red-500" : item.type === "tried" ? "bg-green-500" : "bg-orange-500"}`}>
                   {item.type === "like"
                     ? <Heart className="h-2.5 w-2.5 text-white fill-white" />
+                    : item.type === "tried"
+                    ? <UtensilsCrossed className="h-2.5 w-2.5 text-white" />
                     : <MessageCircle className="h-2.5 w-2.5 text-white" />
                   }
                 </div>
@@ -81,7 +83,7 @@ export default function NotificationsPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm leading-snug">
                   <span className="font-semibold">{item.fromDisplayName}</span>
-                  {item.type === "like" ? " liked " : " commented on "}
+                  {item.type === "like" ? " liked " : item.type === "tried" ? " tried " : " commented on "}
                   <span className="font-semibold">{item.dishName}</span>
                 </p>
                 {item.type === "comment" && item.commentText && (

@@ -335,22 +335,25 @@ export async function deleteDishLog(logId: string, dishId: string, requestingUid
 
   await deleteDoc(logRef);
 
-  // Recompute coverPhotoURL from remaining logs
+  // Recompute coverPhotoURL — no orderBy to avoid requiring a composite index
   const remaining = await getDocs(
-    query(collection(db, "dishLogs"), where("dishId", "==", dishId), orderBy("createdAt", "desc"))
+    query(collection(db, "dishLogs"), where("dishId", "==", dishId))
   );
-  const newCover = remaining.docs[0]?.data().photoURL ?? "";
+  // Sort client-side by createdAt desc, pick most recent
+  const sorted = remaining.docs
+    .map((d) => ({ photoURL: d.data().photoURL as string, ts: (d.data().createdAt as Timestamp | null)?.toMillis() ?? 0 }))
+    .sort((a, b) => b.ts - a.ts);
+  const newCover = sorted[0]?.photoURL ?? "";
   await updateDoc(doc(db, "dishes", dishId), { coverPhotoURL: newCover });
 }
 
 export async function getDishLogs(dishId: string): Promise<DishLogDoc[]> {
-  const q = query(
-    collection(db, "dishLogs"),
-    where("dishId", "==", dishId),
-    orderBy("createdAt", "asc")
-  );
+  // No orderBy — avoids requiring a composite index; sort client-side instead
+  const q = query(collection(db, "dishLogs"), where("dishId", "==", dishId));
   const snaps = await getDocs(q);
-  return snaps.docs.map((d) => ({ id: d.id, ...d.data() } as DishLogDoc));
+  const logs = snaps.docs.map((d) => ({ id: d.id, ...d.data() } as DishLogDoc));
+  // Sort by createdAt asc client-side
+  return logs.sort((a, b) => (a.createdAt?.toMillis() ?? 0) - (b.createdAt?.toMillis() ?? 0));
 }
 
 // ─── ELO Updates ─────────────────────────────────────────────────────────────
@@ -438,7 +441,7 @@ export async function getLikers(dishId: string): Promise<{ users: UserDoc[]; tot
 
 export interface ActivityItem {
   id: string;
-  type: "like" | "comment";
+  type: "like" | "comment" | "tried";
   fromUid: string;
   fromDisplayName: string;
   fromPhotoURL: string;
@@ -582,7 +585,7 @@ export interface NotificationDoc {
   fromUid: string;
   fromDisplayName: string;
   fromPhotoURL: string;
-  type: "like" | "comment";
+  type: "like" | "comment" | "tried";
   dishId: string;
   dishName: string;
   read: boolean;
@@ -594,7 +597,7 @@ export async function createNotification(data: {
   fromUid: string;
   fromDisplayName: string;
   fromPhotoURL: string;
-  type: "like" | "comment";
+  type: "like" | "comment" | "tried";
   dishId: string;
   dishName: string;
 }): Promise<void> {

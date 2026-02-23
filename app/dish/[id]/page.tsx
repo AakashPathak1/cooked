@@ -209,6 +209,31 @@ export default function DishPage() {
             : [...d.taggedUserIds, user.uid],
         } : d);
       }
+
+      // Notify dish owner that someone tried their dish
+      if (dish.creatorId !== user.uid) {
+        const fromUser = u ?? await getUserByUid(user.uid);
+        await createNotification({
+          toUid: dish.creatorId,
+          fromUid: user.uid,
+          fromDisplayName: fromUser?.displayName ?? "Someone",
+          fromPhotoURL: fromUser?.photoURL ?? "",
+          type: "tried",
+          dishId: dish.id,
+          dishName: dish.name,
+        });
+        fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toUid: dish.creatorId,
+            title: "🍳 Cooked",
+            body: `${fromUser?.displayName ?? "Someone"} tried your dish "${dish.name}"`,
+            url: `/dish/${dish.id}`,
+          }),
+        }).catch(() => {});
+      }
+
       if (personal.length >= 2) {
         setRankingDishes(personal);
         setShowRanking(true);
@@ -369,16 +394,16 @@ export default function DishPage() {
                           <AvatarFallback className="text-[8px]">{uploader.displayName?.[0]}</AvatarFallback>
                         </Avatar>
                         <span className="text-white text-xs font-medium">{uploader.displayName}</span>
+                        {/* Delete own log inline with uploader pill — avoids collision with ELO badge */}
+                        {isMyLog && !isOwner && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteLog(log.id!); }}
+                            className="ml-0.5 p-0.5 rounded-full hover:bg-white/20 active:bg-white/30 transition-colors"
+                          >
+                            <Trash2 className="h-3 w-3 text-white/80" />
+                          </button>
+                        )}
                       </div>
-                    )}
-                    {/* Delete own log — non-creator only (owner uses the dish delete button) */}
-                    {isMyLog && !isOwner && (
-                      <button
-                        onClick={() => handleDeleteLog(log.id!)}
-                        className="absolute top-12 right-4 bg-black/40 backdrop-blur-sm rounded-full p-2"
-                      >
-                        <Trash2 className="h-4 w-4 text-white" />
-                      </button>
                     )}
                   </div>
                 );
