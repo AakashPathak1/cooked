@@ -55,8 +55,16 @@ export default function ProfilePage() {
     );
   }
 
-  const soloDishes = dishes.filter((d) => d.role === "creator");
-  const taggedDishes = dishes.filter((d) => d.role === "tagged" || d.role === "tried");
+  // Solo: dishes the user created with nobody else tagged
+  const soloDishes = dishes.filter(
+    (d) => d.role === "creator" && (d.taggedUserIds?.length ?? 0) === 0
+  );
+  // Tagged: dishes they created and tagged someone in, OR were tagged in by someone else
+  const taggedDishes = dishes.filter(
+    (d) =>
+      (d.role === "creator" && (d.taggedUserIds?.length ?? 0) > 0) ||
+      d.role === "tagged"
+  );
 
   const sorted = [...dishes].sort((a, b) => {
     if (sort === "score") {
