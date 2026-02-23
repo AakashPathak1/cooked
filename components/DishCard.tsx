@@ -8,7 +8,7 @@ import {
   getUserByUid, getDish, createNotification, DishDoc,
 } from "@/lib/firestore";
 import { useAuth } from "@/hooks/useAuth";
-import { eloToRating, scoreBgClass } from "@/lib/eloDisplay";
+import { eloToRating, scoreColor } from "@/lib/eloDisplay";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface DishCardProps {
@@ -26,7 +26,6 @@ export function DishCard({ dish }: DishCardProps) {
 
   const score = dish.globalScore ?? 1200;
   const rating = eloToRating(score);
-  const badgeBg = scoreBgClass(score);
 
   useEffect(() => {
     if (!user) return;
@@ -92,8 +91,11 @@ export function DishCard({ dish }: DishCardProps) {
             <div className="w-full h-full flex items-center justify-center text-5xl">🍽️</div>
           )}
 
-          {/* Score badge — color reflects quality (green=great, red=bad) */}
-          <div className={`absolute top-3 right-3 w-11 h-11 rounded-full ${badgeBg} shadow-lg flex items-center justify-center`}>
+          {/* Score badge — smooth green→yellow→orange→red gradient */}
+          <div
+            className="absolute top-3 right-3 w-11 h-11 rounded-full shadow-lg flex items-center justify-center"
+            style={{ backgroundColor: scoreColor(score) }}
+          >
             <span className="text-white text-sm font-bold">{rating}</span>
           </div>
         </div>

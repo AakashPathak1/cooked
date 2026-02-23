@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { getAllUsers, createDish, getPersonalDishes, UserDoc, DishDoc } from "@/lib/firestore";
 import { compressImageToBase64 } from "@/lib/storage";
-import { Camera, ImageIcon, X, Lock, Globe } from "lucide-react";
+import { ImageIcon, X, Lock, Globe, Check, Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PairwiseComparison } from "@/components/PairwiseComparison";
 import { QUICK_RATING_OPTIONS, QUICK_RATINGS, QuickRating } from "@/lib/elo";
@@ -15,7 +15,6 @@ type Stage = "form" | "ranking";
 export function UploadForm() {
   const { user } = useAuth();
   const router = useRouter();
-  const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
 
   const [stage, setStage] = useState<Stage>("form");
@@ -31,6 +30,7 @@ export function UploadForm() {
   const [tagged, setTagged] = useState<string[]>([]);
   const [isPrivate, setIsPrivate] = useState(false);
   const [quickRating, setQuickRating] = useState<QuickRating | null>(null);
+  const [tagSearch, setTagSearch] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -140,33 +140,14 @@ export function UploadForm() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => cameraRef.current?.click()}
-            className="aspect-square rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-gray-400 active:bg-gray-50 transition-colors"
-          >
-            <Camera className="h-8 w-8" />
-            <span className="text-sm font-medium">Take photo</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => libraryRef.current?.click()}
-            className="aspect-square rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-gray-400 active:bg-gray-50 transition-colors"
-          >
-            <ImageIcon className="h-8 w-8" />
-            <span className="text-sm font-medium">Choose from library</span>
-          </button>
-          {/* Camera input — forces camera on mobile */}
-          <input
-            ref={cameraRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleFile}
-          />
-          {/* Library input — opens photo picker on mobile */}
+        <button
+          type="button"
+          onClick={() => libraryRef.current?.click()}
+          className="aspect-square rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-2 text-gray-400 active:bg-gray-50 transition-colors w-full"
+        >
+          <ImageIcon className="h-10 w-10" />
+          <span className="text-sm font-medium">Add photo</span>
+          <span className="text-xs text-gray-300">Take photo or choose from library</span>
           <input
             ref={libraryRef}
             type="file"
@@ -174,7 +155,7 @@ export function UploadForm() {
             className="hidden"
             onChange={handleFile}
           />
-        </div>
+        </button>
       )}
 
       {/* Dish name */}
@@ -251,26 +232,66 @@ export function UploadForm() {
       {/* Tag friends */}
       {allUsers.length > 0 && (
         <div>
-          <p className="text-sm font-semibold text-gray-700 mb-2 px-1">Tag friends</p>
-          <div className="flex flex-wrap gap-2">
-            {allUsers.map((u) => (
-              <button
-                key={u.uid}
-                type="button"
-                onClick={() => toggleTag(u.uid)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium border transition-colors ${
-                  tagged.includes(u.uid)
-                    ? "bg-orange-500 text-white border-orange-500"
-                    : "bg-white text-gray-700 border-gray-200"
-                }`}
-              >
-                <Avatar className="h-5 w-5">
-                  <AvatarImage src={u.photoURL} />
-                  <AvatarFallback className="text-[10px]">{(u.displayName || u.handle)[0]}</AvatarFallback>
-                </Avatar>
-                {u.displayName || u.handle}
+          <div className="flex items-center justify-between mb-2 px-1">
+            <p className="text-sm font-semibold text-gray-700">Tag friends</p>
+            {tagged.length > 0 && (
+              <span className="text-xs text-orange-500 font-medium">{tagged.length} selected</span>
+            )}
+          </div>
+          {/* Search */}
+          <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5 mb-2">
+            <Search className="h-4 w-4 text-gray-400 shrink-0" />
+            <input
+              type="text"
+              placeholder="Search people…"
+              value={tagSearch}
+              onChange={(e) => setTagSearch(e.target.value)}
+              className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400"
+            />
+            {tagSearch && (
+              <button type="button" onClick={() => setTagSearch("")} className="text-gray-400">
+                <X className="h-3.5 w-3.5" />
               </button>
-            ))}
+            )}
+          </div>
+          {/* List */}
+          <div className="rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100" style={{ maxHeight: 220, overflowY: "auto" }}>
+            {allUsers
+              .filter((u) => {
+                const q = tagSearch.toLowerCase();
+                return !q
+                  || (u.displayName || "").toLowerCase().includes(q)
+                  || u.handle.toLowerCase().includes(q);
+              })
+              .map((u) => {
+                const isTagged = tagged.includes(u.uid);
+                return (
+                  <button
+                    key={u.uid}
+                    type="button"
+                    onClick={() => toggleTag(u.uid)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 transition-colors ${
+                      isTagged ? "bg-orange-50" : "bg-white active:bg-gray-50"
+                    }`}
+                  >
+                    <Avatar className="h-8 w-8 shrink-0">
+                      <AvatarImage src={u.photoURL} />
+                      <AvatarFallback className="bg-orange-100 text-orange-600 text-xs font-semibold">
+                        {(u.displayName || u.handle)[0]}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0 text-left">
+                      <p className="font-semibold text-sm leading-tight truncate">{u.displayName || u.handle}</p>
+                      <p className="text-xs text-gray-400 truncate">@{u.handle}</p>
+                    </div>
+                    <div className={`h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                      isTagged ? "bg-orange-500 border-orange-500" : "border-gray-300"
+                    }`}>
+                      {isTagged && <Check className="h-3 w-3 text-white" />}
+                    </div>
+                  </button>
+                );
+              })}
           </div>
         </div>
       )}

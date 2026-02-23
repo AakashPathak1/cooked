@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { getPersonalDishes, getPendingTags, DishDoc } from "@/lib/firestore";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { eloToRating, scoreBgClass } from "@/lib/eloDisplay";
+import { eloToRating, scoreColor } from "@/lib/eloDisplay";
 import { Plus, CalendarDays, Trophy, ChevronRight, Tag } from "lucide-react";
 
 type SortMode = "date" | "elo";
@@ -167,7 +167,6 @@ export default function MePage() {
           {sorted.map((dish) => {
             const score = dish.personalElo ?? dish.globalScore ?? 1200;
             const rating = eloToRating(score);
-            const badgeBg = scoreBgClass(score);
             return (
               <Link key={dish.id} href={`/dish/${dish.id}`}>
                 <div className="relative aspect-square bg-gray-100 rounded-lg overflow-hidden">
@@ -176,8 +175,11 @@ export default function MePage() {
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-2xl">🍽️</div>
                   )}
-                  {/* Score badge — gradient green→red */}
-                  <div className={`absolute bottom-1 right-1 ${badgeBg} rounded-full h-7 w-7 flex items-center justify-center shadow`}>
+                  {/* Score badge — smooth gradient */}
+                  <div
+                    className="absolute bottom-1 right-1 rounded-full h-7 w-7 flex items-center justify-center shadow"
+                    style={{ backgroundColor: scoreColor(score) }}
+                  >
                     <span className="text-white text-[8px] font-bold leading-none">{rating}</span>
                   </div>
                   {/* Role pill */}

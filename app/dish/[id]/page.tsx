@@ -31,9 +31,9 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Heart, ExternalLink, Send, ChevronLeft,
-  Trash2, Lock, Globe, X, Pencil, Check,
+  Trash2, Lock, Globe, X, Pencil, Check, Search,
 } from "lucide-react";
-import { eloToRating, scoreBgClass } from "@/lib/eloDisplay";
+import { eloToRating, scoreColor } from "@/lib/eloDisplay";
 import { QUICK_RATING_OPTIONS, QUICK_RATINGS, QuickRating } from "@/lib/elo";
 import { PairwiseComparison } from "@/components/PairwiseComparison";
 
@@ -68,6 +68,7 @@ export default function DishPage() {
   const [allUsers, setAllUsers] = useState<UserDoc[]>([]);
   const [pendingTagIds, setPendingTagIds] = useState<string[]>([]);
   const [savingTags, setSavingTags] = useState(false);
+  const [tagSearch, setTagSearch] = useState("");
 
   // Accept tag state
   const [isTagPending, setIsTagPending] = useState(false);
@@ -289,6 +290,7 @@ export default function DishPage() {
     const users = await getAllUsers();
     setAllUsers(users.filter((u) => u.uid !== dish.creatorId));
     setPendingTagIds(dish.taggedUserIds ?? []);
+    setTagSearch("");
     setEditingTags(true);
   }
 
@@ -346,7 +348,6 @@ export default function DishPage() {
   }
 
   const score = dish.globalScore ?? 1200;
-  const badgeBg = scoreBgClass(score);
   const isOwner = user?.uid === dish.creatorId;
 
   // Ranking overlay
@@ -473,22 +474,56 @@ export default function DishPage() {
       {editingTags && (
         <div
           className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6"
-          onClick={() => setEditingTags(false)}
+          onClick={() => { setEditingTags(false); setTagSearch(""); }}
         >
           <div
             className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl"
             style={{ maxHeight: "75vh" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
-              <h2 className="font-bold text-base">Edit tags</h2>
-              <button onClick={() => setEditingTags(false)} className="p-1 -mr-1">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+              <div>
+                <h2 className="font-bold text-base">Tag people</h2>
+                {pendingTagIds.length > 0 && (
+                  <p className="text-xs text-orange-500 mt-0.5">{pendingTagIds.length} selected</p>
+                )}
+              </div>
+              <button onClick={() => { setEditingTags(false); setTagSearch(""); }} className="p-1 -mr-1">
                 <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
-            <div className="overflow-y-auto flex-1 min-h-0 p-4">
-              <div className="flex flex-wrap gap-2">
-                {allUsers.map((u) => {
+
+            {/* Search */}
+            <div className="px-4 pb-3 shrink-0">
+              <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
+                <Search className="h-4 w-4 text-gray-400 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Search people…"
+                  value={tagSearch}
+                  onChange={(e) => setTagSearch(e.target.value)}
+                  autoFocus
+                  className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400"
+                />
+                {tagSearch && (
+                  <button onClick={() => setTagSearch("")} className="text-gray-400">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* User list */}
+            <div className="overflow-y-auto flex-1 min-h-0 border-t border-gray-100">
+              {allUsers
+                .filter((u) => {
+                  const q = tagSearch.toLowerCase();
+                  return !q
+                    || (u.displayName || "").toLowerCase().includes(q)
+                    || u.handle.toLowerCase().includes(q);
+                })
+                .map((u) => {
                   const selected = pendingTagIds.includes(u.uid);
                   return (
                     <button
@@ -496,20 +531,33 @@ export default function DishPage() {
                       onClick={() => setPendingTagIds((prev) =>
                         selected ? prev.filter((id) => id !== u.uid) : [...prev, u.uid]
                       )}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium border transition-colors ${
-                        selected ? "bg-orange-500 text-white border-orange-500" : "bg-white text-gray-700 border-gray-200"
+                      className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${
+                        selected ? "bg-orange-50" : "active:bg-gray-50"
                       }`}
                     >
-                      <Avatar className="h-5 w-5">
+                      <Avatar className="h-9 w-9 shrink-0">
                         <AvatarImage src={u.photoURL} />
-                        <AvatarFallback className="text-[10px]">{(u.displayName || u.handle)[0]}</AvatarFallback>
+                        <AvatarFallback className="bg-orange-100 text-orange-600 text-sm font-semibold">
+                          {(u.displayName || u.handle)[0]}
+                        </AvatarFallback>
                       </Avatar>
-                      {u.displayName || u.handle}
+                      <div className="flex-1 min-w-0 text-left">
+                        <p className="font-semibold text-sm leading-tight truncate">
+                          {u.displayName || u.handle}
+                        </p>
+                        <p className="text-xs text-gray-400 truncate">@{u.handle}</p>
+                      </div>
+                      <div className={`h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                        selected ? "bg-orange-500 border-orange-500" : "border-gray-300"
+                      }`}>
+                        {selected && <Check className="h-3 w-3 text-white" />}
+                      </div>
                     </button>
                   );
                 })}
-              </div>
             </div>
+
+            {/* Save */}
             <div className="p-4 border-t border-gray-100 shrink-0">
               <button
                 onClick={handleSaveTags}
@@ -572,7 +620,10 @@ export default function DishPage() {
             <ChevronLeft className="h-5 w-5 text-white" />
           </button>
 
-          <div className={`absolute top-12 right-4 ${badgeBg} rounded-full h-12 w-12 flex items-center justify-center shadow-lg`}>
+          <div
+            className="absolute top-12 right-4 rounded-full h-12 w-12 flex items-center justify-center shadow-lg"
+            style={{ backgroundColor: scoreColor(score) }}
+          >
             <span className="text-white text-sm font-bold">{eloToRating(score)}</span>
           </div>
 

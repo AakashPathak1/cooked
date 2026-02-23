@@ -12,13 +12,10 @@ export function eloToRating(elo: number): string {
   return rating.toFixed(1);
 }
 
-// Returns a Tailwind bg class representing a green→red gradient by score.
-// Used for score badge backgrounds on cards and dish pages.
-export function scoreBgClass(elo: number): string {
+// Returns an HSL color string for a smooth green→yellow→orange→red gradient.
+// Interpolates hue 0 (red) → 120 (green) based on the 0–10 score.
+export function scoreColor(elo: number): string {
   const rating = Math.min(10, Math.max(0, ((elo - 1000) / 400) * 10));
-  if (rating >= 8)   return "bg-green-500";
-  if (rating >= 6.5) return "bg-lime-500";
-  if (rating >= 5)   return "bg-amber-500";
-  if (rating >= 3)   return "bg-orange-500";
-  return "bg-red-500";
+  const hue = Math.round((rating / 10) * 120);
+  return `hsl(${hue}, 80%, 44%)`;
 }
