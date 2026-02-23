@@ -275,10 +275,10 @@ export default function DishPage() {
 
   return (
     <>
-      {/* Likers modal */}
+      {/* Likers modal — z-[60] so it sits above the z-50 bottom nav */}
       {showLikersModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/50"
+          className="fixed inset-0 z-[60] bg-black/50"
           onClick={() => setShowLikersModal(false)}
         >
           <div
@@ -289,35 +289,39 @@ export default function DishPage() {
             <div className="flex justify-center pt-3 pb-1">
               <div className="w-10 h-1 rounded-full bg-gray-200" />
             </div>
-            <div className="flex items-center justify-between px-5 pt-2 pb-3">
-              <h2 className="font-bold text-lg">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-2 pb-4 border-b border-gray-100">
+              <h2 className="font-bold text-base">
                 {likesCount} like{likesCount !== 1 ? "s" : ""}
               </h2>
-              <button onClick={() => setShowLikersModal(false)} className="p-1">
+              <button onClick={() => setShowLikersModal(false)} className="p-1 -mr-1">
                 <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
-            <div className="px-5 pb-10 max-h-[60vh] overflow-y-auto">
+            {/* Scrollable list — max-h accounts for header (~80px) + safe area */}
+            <div className="overflow-y-auto" style={{ maxHeight: "min(60vh, 400px)" }}>
               {likers.length === 0 ? (
-                <p className="text-center text-gray-400 py-8 text-sm">No likes yet</p>
+                <p className="text-center text-gray-400 py-10 text-sm">No likes yet</p>
               ) : (
-                <div className="space-y-4">
+                <div className="divide-y divide-gray-50">
                   {likers.map((u) => (
                     <Link key={u.uid} href={`/profile/${u.handle}`} onClick={() => setShowLikersModal(false)}>
-                      <div className="flex items-center gap-3 active:opacity-70 transition-opacity">
-                        <Avatar className="h-10 w-10">
+                      <div className="flex items-center gap-3 px-5 py-3.5 active:bg-gray-50 transition-colors">
+                        <Avatar className="h-10 w-10 shrink-0">
                           <AvatarImage src={u.photoURL} />
                           <AvatarFallback className="bg-orange-100 text-orange-600 font-semibold">{u.displayName?.[0]}</AvatarFallback>
                         </Avatar>
                         <div>
-                          <p className="font-semibold text-sm">{u.displayName}</p>
-                          <p className="text-xs text-gray-400">@{u.handle}</p>
+                          <p className="font-semibold text-sm leading-tight">{u.displayName}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">@{u.handle}</p>
                         </div>
                       </div>
                     </Link>
                   ))}
                 </div>
               )}
+              {/* Bottom safe-area spacer */}
+              <div className="h-6" />
             </div>
           </div>
         </div>
