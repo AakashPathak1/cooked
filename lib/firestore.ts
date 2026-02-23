@@ -14,6 +14,8 @@ import {
   increment,
   deleteDoc,
   arrayUnion,
+  arrayRemove,
+  getDocsFromServer,
   Timestamp,
 } from "firebase/firestore";
 import { db } from "./firebase";
@@ -327,24 +329,45 @@ export async function createDishLog(
 }
 
 // Delete a single dish log (any user can delete their own log)
-export async function deleteDishLog(logId: string, dishId: string, requestingUid: string): Promise<void> {
+// Returns true if the user was untagged from the dish (no more logs + was "tried")
+export async function deleteDishLog(logId: string, dishId: string, requestingUid: string): Promise<{ wasUntagged: boolean }> {
   const logRef = doc(db, "dishLogs", logId);
   const logSnap = await getDoc(logRef);
-  if (!logSnap.exists()) return;
+  if (!logSnap.exists()) return { wasUntagged: false };
   if (logSnap.data().userId !== requestingUid) throw new Error("Not authorized");
 
   await deleteDoc(logRef);
 
-  // Recompute coverPhotoURL — no orderBy to avoid requiring a composite index
-  const remaining = await getDocs(
+  // Use getDocsFromServer to bypass local cache — getDocs can return the
+  // just-deleted doc if Firestore's cache hasn't been flushed yet
+  const remainingSnap = await getDocsFromServer(
     query(collection(db, "dishLogs"), where("dishId", "==", dishId))
   );
-  // Sort client-side by createdAt desc, pick most recent
-  const sorted = remaining.docs
+
+  // Recompute coverPhotoURL: pick most recent remaining log
+  const sorted = remainingSnap.docs
     .map((d) => ({ photoURL: d.data().photoURL as string, ts: (d.data().createdAt as Timestamp | null)?.toMillis() ?? 0 }))
     .sort((a, b) => b.ts - a.ts);
   const newCover = sorted[0]?.photoURL ?? "";
   await updateDoc(doc(db, "dishes", dishId), { coverPhotoURL: newCover });
+
+  // Untag if user has no remaining logs AND their role is "tried"
+  // (explicitly tagged users keep their tag even if they have no photos)
+  const userRemainingLogs = remainingSnap.docs.filter((d) => d.data().userId === requestingUid);
+  if (userRemainingLogs.length === 0) {
+    const udRef = doc(db, "userDishes", `${requestingUid}_${dishId}`);
+    const udSnap = await getDoc(udRef);
+    if (udSnap.exists() && udSnap.data().role === "tried") {
+      await Promise.all([
+        updateDoc(doc(db, "dishes", dishId), { taggedUserIds: arrayRemove(requestingUid) }),
+        deleteDoc(udRef),
+        deleteDoc(doc(db, "userDishElos", `${requestingUid}_${dishId}`)),
+      ]);
+      return { wasUntagged: true };
+    }
+  }
+
+  return { wasUntagged: false };
 }
 
 export async function getDishLogs(dishId: string): Promise<DishLogDoc[]> {

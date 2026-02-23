@@ -251,10 +251,22 @@ export default function DishPage() {
     if (!user || !dish) return;
     if (!confirm("Remove your photo from this dish?")) return;
     try {
-      await deleteDishLog(logId, dish.id, user.uid);
+      const { wasUntagged } = await deleteDishLog(logId, dish.id, user.uid);
       const updatedLogs = await getDishLogs(dish.id);
+      // Cover = most recent remaining log (getDishLogs sorts asc, so last = newest)
+      const newCover = updatedLogs[updatedLogs.length - 1]?.photoURL ?? "";
       setLogs(updatedLogs);
-      setDish((d) => d ? { ...d, coverPhotoURL: updatedLogs[0]?.photoURL ?? "" } : d);
+      setDish((d) => {
+        if (!d) return d;
+        const next: typeof d = { ...d, coverPhotoURL: newCover };
+        if (wasUntagged) {
+          next.taggedUserIds = d.taggedUserIds.filter((id) => id !== user.uid);
+        }
+        return next;
+      });
+      if (wasUntagged) {
+        setTaggedUsers((prev) => prev.filter((u) => u.uid !== user!.uid));
+      }
     } catch (err) {
       console.error(err);
       alert("Failed to remove photo.");
