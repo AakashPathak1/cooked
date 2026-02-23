@@ -275,31 +275,28 @@ export default function DishPage() {
 
   return (
     <>
-      {/* Likers modal — z-[60] so it sits above the z-50 bottom nav */}
+      {/* Likers modal — centered dialog, z-[60] above z-50 bottom nav */}
       {showLikersModal && (
         <div
-          className="fixed inset-0 z-[60] bg-black/50"
+          className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6"
           onClick={() => setShowLikersModal(false)}
         >
           <div
-            className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl"
+            className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl"
+            style={{ maxHeight: "70vh" }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Drag handle */}
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-gray-200" />
-            </div>
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-2 pb-4 border-b border-gray-100">
+            {/* Header — never scrolls */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
               <h2 className="font-bold text-base">
-                {likesCount} like{likesCount !== 1 ? "s" : ""}
+                {likers.length} like{likers.length !== 1 ? "s" : ""}
               </h2>
               <button onClick={() => setShowLikersModal(false)} className="p-1 -mr-1">
                 <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
-            {/* Scrollable list — max-h accounts for header (~80px) + safe area */}
-            <div className="overflow-y-auto" style={{ maxHeight: "min(60vh, 400px)" }}>
+            {/* Scrollable list */}
+            <div className="overflow-y-auto flex-1">
               {likers.length === 0 ? (
                 <p className="text-center text-gray-400 py-10 text-sm">No likes yet</p>
               ) : (
@@ -320,8 +317,6 @@ export default function DishPage() {
                   ))}
                 </div>
               )}
-              {/* Bottom safe-area spacer */}
-              <div className="h-6" />
             </div>
           </div>
         </div>
