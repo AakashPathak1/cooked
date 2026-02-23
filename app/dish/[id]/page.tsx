@@ -296,8 +296,8 @@ export default function DishPage() {
                 <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
-            {/* Scrollable list */}
-            <div className="overflow-y-auto flex-1">
+            {/* Scrollable list — min-h-0 lets flex-1 shrink below content height */}
+            <div className="overflow-y-auto flex-1 min-h-0">
               {likers.length === 0 ? (
                 <p className="text-center text-gray-400 py-10 text-sm">No likes yet</p>
               ) : (
