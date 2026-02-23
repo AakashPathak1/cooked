@@ -395,12 +395,13 @@ export async function isLiked(uid: string, dishId: string): Promise<boolean> {
   return snap.exists();
 }
 
-export async function getLikers(dishId: string): Promise<UserDoc[]> {
+export async function getLikers(dishId: string): Promise<{ users: UserDoc[]; total: number }> {
   const q = query(collection(db, "likes"), where("dishId", "==", dishId));
   const snaps = await getDocs(q);
+  const total = snaps.size;
   const uids = snaps.docs.map((d) => d.data().userId as string);
-  const users = await Promise.all(uids.map((uid) => getUserByUid(uid)));
-  return users.filter(Boolean) as UserDoc[];
+  const resolved = await Promise.all(uids.map((uid) => getUserByUid(uid)));
+  return { users: resolved.filter(Boolean) as UserDoc[], total };
 }
 
 // ─── Activity feed ────────────────────────────────────────────────────────────

@@ -139,8 +139,9 @@ export default function DishPage() {
 
   async function handleOpenLikers() {
     if (!dish) return;
-    const users = await getLikers(dish.id);
+    const { users, total } = await getLikers(dish.id);
     setLikers(users);
+    setLikesCount(total); // sync with actual like-doc count
     setShowLikersModal(true);
   }
 
@@ -289,7 +290,7 @@ export default function DishPage() {
             {/* Header — never scrolls */}
             <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
               <h2 className="font-bold text-base">
-                {likers.length} like{likers.length !== 1 ? "s" : ""}
+                {likesCount} like{likesCount !== 1 ? "s" : ""}
               </h2>
               <button onClick={() => setShowLikersModal(false)} className="p-1 -mr-1">
                 <X className="h-5 w-5 text-gray-400" />
