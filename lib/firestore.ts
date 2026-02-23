@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   increment,
   deleteDoc,
+  arrayUnion,
   Timestamp,
 } from "firebase/firestore";
 import { db } from "./firebase";
@@ -308,9 +309,38 @@ export async function createDishLog(
     if (!eloSnap.exists()) {
       await setDoc(eloRef, { userId, dishId, elo: DEFAULT_RATING });
     }
+
+    // Tag the user on the dish doc if not already tagged / creator
+    const dishSnap = await getDoc(doc(db, "dishes", dishId));
+    if (dishSnap.exists()) {
+      const tagged: string[] = dishSnap.data().taggedUserIds ?? [];
+      const creatorId: string = dishSnap.data().creatorId;
+      if (userId !== creatorId && !tagged.includes(userId)) {
+        await updateDoc(doc(db, "dishes", dishId), {
+          taggedUserIds: arrayUnion(userId),
+        });
+      }
+    }
   }
 
   return ref.id;
+}
+
+// Delete a single dish log (any user can delete their own log)
+export async function deleteDishLog(logId: string, dishId: string, requestingUid: string): Promise<void> {
+  const logRef = doc(db, "dishLogs", logId);
+  const logSnap = await getDoc(logRef);
+  if (!logSnap.exists()) return;
+  if (logSnap.data().userId !== requestingUid) throw new Error("Not authorized");
+
+  await deleteDoc(logRef);
+
+  // Recompute coverPhotoURL from remaining logs
+  const remaining = await getDocs(
+    query(collection(db, "dishLogs"), where("dishId", "==", dishId), orderBy("createdAt", "desc"))
+  );
+  const newCover = remaining.docs[0]?.data().photoURL ?? "";
+  await updateDoc(doc(db, "dishes", dishId), { coverPhotoURL: newCover });
 }
 
 export async function getDishLogs(dishId: string): Promise<DishLogDoc[]> {

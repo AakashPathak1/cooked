@@ -10,6 +10,7 @@ import {
   getDish,
   getDishLogs,
   createDishLog,
+  deleteDishLog,
   deleteDish,
   updateDishPrivacy,
   getPersonalDishes,
@@ -187,14 +188,27 @@ export default function DishPage() {
     try {
       const photoURL = await compressImageToBase64(f);
       await createDishLog(dish.id, user.uid, photoURL);
-      const [updatedLogs, personal] = await Promise.all([
+      const [updatedLogs, personal, u] = await Promise.all([
         getDishLogs(dish.id),
         getPersonalDishes(user.uid),
+        getUserByUid(user.uid),
       ]);
       setLogs(updatedLogs);
-      const u = await getUserByUid(user.uid);
-      if (u) setLogUsers((m) => ({ ...m, [user.uid]: u }));
-      setDish((d) => d ? { ...d, coverPhotoURL: photoURL } : d);
+      if (u) {
+        setLogUsers((m) => ({ ...m, [user.uid]: u }));
+        // Add to tagged users display if not already listed
+        setTaggedUsers((prev) => {
+          if (prev.some((p) => p.uid === user.uid)) return prev;
+          return [...prev, u];
+        });
+        setDish((d) => d ? {
+          ...d,
+          coverPhotoURL: photoURL,
+          taggedUserIds: d.taggedUserIds.includes(user.uid)
+            ? d.taggedUserIds
+            : [...d.taggedUserIds, user.uid],
+        } : d);
+      }
       if (personal.length >= 2) {
         setRankingDishes(personal);
         setShowRanking(true);
@@ -205,6 +219,20 @@ export default function DishPage() {
     } finally {
       setTryLoading(false);
       e.target.value = "";
+    }
+  }
+
+  async function handleDeleteLog(logId: string) {
+    if (!user || !dish) return;
+    if (!confirm("Remove your photo from this dish?")) return;
+    try {
+      await deleteDishLog(logId, dish.id, user.uid);
+      const updatedLogs = await getDishLogs(dish.id);
+      setLogs(updatedLogs);
+      setDish((d) => d ? { ...d, coverPhotoURL: updatedLogs[0]?.photoURL ?? "" } : d);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to remove photo.");
     }
   }
 
@@ -330,6 +358,7 @@ export default function DishPage() {
             <div className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide">
               {logs.map((log) => {
                 const uploader = logUsers[log.userId];
+                const isMyLog = log.userId === user?.uid;
                 return (
                   <div key={log.id} className="relative shrink-0 w-full aspect-square bg-gray-100 snap-start">
                     <img src={log.photoURL} alt={dish.name} className="w-full h-full object-cover" />
@@ -341,6 +370,15 @@ export default function DishPage() {
                         </Avatar>
                         <span className="text-white text-xs font-medium">{uploader.displayName}</span>
                       </div>
+                    )}
+                    {/* Delete own log — non-creator only (owner uses the dish delete button) */}
+                    {isMyLog && !isOwner && (
+                      <button
+                        onClick={() => handleDeleteLog(log.id!)}
+                        className="absolute top-12 right-4 bg-black/40 backdrop-blur-sm rounded-full p-2"
+                      >
+                        <Trash2 className="h-4 w-4 text-white" />
+                      </button>
                     )}
                   </div>
                 );
@@ -465,7 +503,7 @@ export default function DishPage() {
               >
                 <Camera className="h-4 w-4 text-orange-500" />
                 <span className="text-sm font-semibold text-orange-600">
-                  {tryLoading ? "Adding…" : "I've tried this"}
+                  {tryLoading ? "Adding…" : "I tried this dish"}
                 </span>
               </button>
             )}
