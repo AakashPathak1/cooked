@@ -59,6 +59,8 @@ export default function DishPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [rankingDishes, setRankingDishes] = useState<DishDoc[]>([]);
   const [showRanking, setShowRanking] = useState(false);
+  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const photoScrollRef = useRef<HTMLDivElement>(null);
   const commentsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -392,7 +394,15 @@ export default function DishPage() {
         {/* Photo scroll */}
         <div className="relative">
           {logs.length > 0 ? (
-            <div className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide">
+            <div
+              ref={photoScrollRef}
+              className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                const idx = Math.round(el.scrollLeft / el.offsetWidth);
+                setCurrentPhotoIndex(idx);
+              }}
+            >
               {logs.map((log) => {
                 const uploader = logUsers[log.userId];
                 const isMyLog = log.userId === user?.uid;
@@ -439,8 +449,21 @@ export default function DishPage() {
           </div>
 
           {logs.length > 1 && (
-            <div className="absolute bottom-3 right-3 bg-black/40 backdrop-blur-sm rounded-full px-2 py-1">
-              <span className="text-white text-xs font-medium">{logs.length} photos</span>
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+              {logs.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    photoScrollRef.current?.scrollTo({ left: i * photoScrollRef.current.offsetWidth, behavior: "smooth" });
+                    setCurrentPhotoIndex(i);
+                  }}
+                  className={`rounded-full transition-all duration-200 ${
+                    i === currentPhotoIndex
+                      ? "w-4 h-2 bg-white"
+                      : "w-2 h-2 bg-white/50"
+                  }`}
+                />
+              ))}
             </div>
           )}
         </div>
