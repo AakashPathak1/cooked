@@ -16,10 +16,10 @@ import {
   getComments,
   addComment,
   toggleLike,
-  toggleSave,
   isLiked,
-  isSaved,
+  getLikers,
   getUserByUid,
+  createNotification,
   DishDoc,
   DishLogDoc,
   CommentDoc,
@@ -28,10 +28,10 @@ import {
 import { compressImageToBase64 } from "@/lib/storage";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  Heart, Bookmark, ExternalLink, Send, ChevronLeft,
+  Heart, ExternalLink, Send, ChevronLeft,
   Camera, Trash2, Lock, Globe, Plus, X,
 } from "lucide-react";
-import { eloTier, eloToRating } from "@/lib/eloDisplay";
+import { eloToRating } from "@/lib/eloDisplay";
 import { PairwiseComparison } from "@/components/PairwiseComparison";
 
 export default function DishPage() {
@@ -42,13 +42,15 @@ export default function DishPage() {
 
   const [dish, setDish] = useState<DishDoc | null>(null);
   const [creator, setCreator] = useState<UserDoc | null>(null);
+  const [taggedUsers, setTaggedUsers] = useState<UserDoc[]>([]);
   const [logs, setLogs] = useState<DishLogDoc[]>([]);
   const [logUsers, setLogUsers] = useState<Record<string, UserDoc>>({});
   const [comments, setComments] = useState<CommentDoc[]>([]);
   const [commentUsers, setCommentUsers] = useState<Record<string, UserDoc>>({});
   const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [likesCount, setLikesCount] = useState(0);
+  const [likers, setLikers] = useState<UserDoc[]>([]);
+  const [showLikersModal, setShowLikersModal] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [fetching, setFetching] = useState(true);
@@ -71,19 +73,21 @@ export default function DishPage() {
       setDish(d);
       setLikesCount(d.likesCount ?? 0);
 
-      const [creatorData, likedData, savedData, commentsData, logsData] = await Promise.all([
+      const [creatorData, likedData, commentsData, logsData] = await Promise.all([
         getUserByUid(d.creatorId),
         isLiked(user.uid, d.id),
-        isSaved(user.uid, d.id),
         getComments(d.id),
         getDishLogs(d.id),
       ]);
 
       setCreator(creatorData);
       setLiked(likedData);
-      setSaved(savedData);
       setComments(commentsData);
       setLogs(logsData);
+
+      // Fetch tagged users
+      const tagged = await Promise.all(d.taggedUserIds.map((uid: string) => getUserByUid(uid)));
+      setTaggedUsers(tagged.filter(Boolean) as UserDoc[]);
 
       // Fetch comment + log users
       const allUids = Array.from(new Set([
@@ -109,23 +113,70 @@ export default function DishPage() {
     const nowLiked = await toggleLike(user.uid, dish.id);
     setLiked(nowLiked);
     setLikesCount((c) => (nowLiked ? c + 1 : c - 1));
+    if (nowLiked && dish.creatorId !== user.uid) {
+      const fromUser = await getUserByUid(user.uid);
+      await createNotification({
+        toUid: dish.creatorId,
+        fromUid: user.uid,
+        fromDisplayName: fromUser?.displayName ?? "Someone",
+        fromPhotoURL: fromUser?.photoURL ?? "",
+        type: "like",
+        dishId: dish.id,
+        dishName: dish.name,
+      });
+      fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toUid: dish.creatorId,
+          title: "🍳 Cooked",
+          body: `${fromUser?.displayName ?? "Someone"} liked "${dish.name}"`,
+          url: `/dish/${dish.id}`,
+        }),
+      }).catch(() => {});
+    }
   }
 
-  async function handleSave() {
-    if (!user || !dish) return;
-    setSaved(await toggleSave(user.uid, dish.id));
+  async function handleOpenLikers() {
+    if (!dish) return;
+    const users = await getLikers(dish.id);
+    setLikers(users);
+    setShowLikersModal(true);
   }
 
   async function handleComment(e: React.FormEvent) {
     e.preventDefault();
     if (!user || !dish || !commentText.trim()) return;
     setSubmitting(true);
-    await addComment(dish.id, user.uid, commentText.trim());
+    const text = commentText.trim();
+    await addComment(dish.id, user.uid, text);
     setCommentText("");
     const updated = await getComments(dish.id);
     setComments(updated);
     setSubmitting(false);
     setTimeout(() => commentsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    if (dish.creatorId !== user.uid) {
+      const fromUser = await getUserByUid(user.uid);
+      await createNotification({
+        toUid: dish.creatorId,
+        fromUid: user.uid,
+        fromDisplayName: fromUser?.displayName ?? "Someone",
+        fromPhotoURL: fromUser?.photoURL ?? "",
+        type: "comment",
+        dishId: dish.id,
+        dishName: dish.name,
+      });
+      fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toUid: dish.creatorId,
+          title: "🍳 Cooked",
+          body: `${fromUser?.displayName ?? "Someone"} commented on "${dish.name}"`,
+          url: `/dish/${dish.id}`,
+        }),
+      }).catch(() => {});
+    }
   }
 
   async function handleTry(e: React.ChangeEvent<HTMLInputElement>) {
@@ -135,7 +186,6 @@ export default function DishPage() {
     try {
       const photoURL = await compressImageToBase64(f);
       await createDishLog(dish.id, user.uid, photoURL);
-      // Refresh logs
       const [updatedLogs, personal] = await Promise.all([
         getDishLogs(dish.id),
         getPersonalDishes(user.uid),
@@ -144,7 +194,6 @@ export default function DishPage() {
       const u = await getUserByUid(user.uid);
       if (u) setLogUsers((m) => ({ ...m, [user.uid]: u }));
       setDish((d) => d ? { ...d, coverPhotoURL: photoURL } : d);
-      // Trigger ranking if enough dishes
       if (personal.length >= 2) {
         setRankingDishes(personal);
         setShowRanking(true);
@@ -195,8 +244,7 @@ export default function DishPage() {
     );
   }
 
-  const tier = eloTier(dish.globalScore ?? 1200);
-  const rating = eloToRating(dish.globalScore ?? 1200);
+  const score = dish.globalScore ?? 1200;
   const isOwner = user?.uid === dish.creatorId;
   const alreadyLogged = logs.some((l) => l.userId === user?.uid);
 
@@ -226,215 +274,280 @@ export default function DishPage() {
   }
 
   return (
-    <div className="mb-nav">
-      {/* Photo scroll */}
-      <div className="relative">
-        {logs.length > 0 ? (
-          <div className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide">
-            {logs.map((log) => {
-              const uploader = logUsers[log.userId];
-              return (
-                <div key={log.id} className="relative shrink-0 w-full aspect-square bg-gray-100 snap-start">
-                  <img src={log.photoURL} alt={dish.name} className="w-full h-full object-cover" />
-                  {/* Uploader avatar */}
-                  {uploader && (
-                    <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full px-2 py-1">
-                      <Avatar className="h-5 w-5">
-                        <AvatarImage src={uploader.photoURL} />
-                        <AvatarFallback className="text-[8px]">{uploader.displayName?.[0]}</AvatarFallback>
+    <>
+      {/* Likers modal */}
+      {showLikersModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-end"
+          onClick={() => setShowLikersModal(false)}
+        >
+          <div
+            className="w-full max-w-lg mx-auto bg-white rounded-t-3xl p-5 pb-safe max-h-[60vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-lg">
+                {likesCount} like{likesCount !== 1 ? "s" : ""}
+              </h2>
+              <button onClick={() => setShowLikersModal(false)}>
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
+            </div>
+            {likers.length === 0 ? (
+              <p className="text-center text-gray-400 py-8 text-sm">No likes yet</p>
+            ) : (
+              <div className="space-y-3">
+                {likers.map((u) => (
+                  <Link key={u.uid} href={`/profile/${u.handle}`} onClick={() => setShowLikersModal(false)}>
+                    <div className="flex items-center gap-3 active:opacity-70 transition-opacity">
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage src={u.photoURL} />
+                        <AvatarFallback className="bg-orange-100 text-orange-600 font-semibold">{u.displayName?.[0]}</AvatarFallback>
                       </Avatar>
-                      <span className="text-white text-xs font-medium">{uploader.displayName}</span>
+                      <div>
+                        <p className="font-semibold text-sm">{u.displayName}</p>
+                        <p className="text-xs text-gray-400">@{u.handle}</p>
+                      </div>
                     </div>
-                  )}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-nav">
+        {/* Photo scroll */}
+        <div className="relative">
+          {logs.length > 0 ? (
+            <div className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide">
+              {logs.map((log) => {
+                const uploader = logUsers[log.userId];
+                return (
+                  <div key={log.id} className="relative shrink-0 w-full aspect-square bg-gray-100 snap-start">
+                    <img src={log.photoURL} alt={dish.name} className="w-full h-full object-cover" />
+                    {uploader && (
+                      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full px-2 py-1">
+                        <Avatar className="h-5 w-5">
+                          <AvatarImage src={uploader.photoURL} />
+                          <AvatarFallback className="text-[8px]">{uploader.displayName?.[0]}</AvatarFallback>
+                        </Avatar>
+                        <span className="text-white text-xs font-medium">{uploader.displayName}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="aspect-square bg-gray-100 flex items-center justify-center text-7xl">🍽️</div>
+          )}
+
+          {/* Back */}
+          <button
+            onClick={() => router.back()}
+            className="absolute top-12 left-4 bg-black/40 backdrop-blur-sm rounded-full p-2"
+          >
+            <ChevronLeft className="h-5 w-5 text-white" />
+          </button>
+
+          {/* Score badge */}
+          <div className="absolute top-12 right-4 bg-orange-500 rounded-full h-12 w-12 flex items-center justify-center shadow-lg shadow-orange-200">
+            <span className="text-white text-sm font-bold">{eloToRating(score)}</span>
+          </div>
+
+          {logs.length > 1 && (
+            <div className="absolute bottom-3 right-3 bg-black/40 backdrop-blur-sm rounded-full px-2 py-1">
+              <span className="text-white text-xs font-medium">{logs.length} photos</span>
+            </div>
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="px-4 pt-4 space-y-4">
+          {/* Title + owner controls */}
+          <div className="flex items-start justify-between gap-2">
+            <h1 className="text-2xl font-bold leading-tight flex-1">{dish.name}</h1>
+            {isOwner && (
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={handlePrivacyToggle}
+                  className="p-2 rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 transition-colors"
+                  title={dish.isPrivate ? "Make public" : "Make private"}
+                >
+                  {dish.isPrivate ? <Lock className="h-4 w-4" /> : <Globe className="h-4 w-4" />}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleteLoading}
+                  className="p-2 rounded-full bg-red-50 text-red-400 disabled:opacity-50 active:bg-red-100 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Owner + Tagged people */}
+          <div className="space-y-2">
+            {creator && (
+              <div className="flex items-center gap-2">
+                <Link href={`/profile/${creator.handle}`} className="flex items-center gap-2 group">
+                  <Avatar className="h-8 w-8 ring-2 ring-white">
+                    <AvatarImage src={creator.photoURL} />
+                    <AvatarFallback className="bg-orange-100 text-orange-600 text-xs">{creator.displayName?.[0]}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-sm font-semibold group-hover:underline">{creator.displayName}</p>
+                    <p className="text-[10px] text-gray-400">Creator</p>
+                  </div>
+                </Link>
+              </div>
+            )}
+            {taggedUsers.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-400 shrink-0">Tagged:</span>
+                {taggedUsers.map((u) => (
+                  <Link key={u.uid} href={`/profile/${u.handle}`}>
+                    <div className="flex items-center gap-1.5 bg-gray-100 rounded-full px-2.5 py-1 active:bg-gray-200 transition-colors">
+                      <Avatar className="h-4 w-4">
+                        <AvatarImage src={u.photoURL} />
+                        <AvatarFallback className="text-[8px]">{u.displayName?.[0]}</AvatarFallback>
+                      </Avatar>
+                      <span className="text-xs font-medium">{u.displayName}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {dish.notes && (
+            <p className="text-gray-600 text-sm leading-relaxed">{dish.notes}</p>
+          )}
+
+          {dish.recipeLink && (
+            <a
+              href={dish.recipeLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-sm text-orange-500 font-medium"
+            >
+              <ExternalLink className="h-4 w-4" /> View recipe
+            </a>
+          )}
+
+          {/* Actions row */}
+          <div className="flex items-center gap-4 py-1">
+            {/* Like + count (count is tappable for modal) */}
+            <button onClick={handleLike} className="flex items-center gap-1.5 group">
+              <Heart className={`h-6 w-6 transition-all duration-150 ${liked ? "fill-red-500 text-red-500 scale-110" : "text-gray-400"}`} />
+            </button>
+            {likesCount > 0 ? (
+              <button onClick={handleOpenLikers} className="text-sm font-semibold text-gray-700 -ml-2 hover:underline">
+                {likesCount} like{likesCount !== 1 ? "s" : ""}
+              </button>
+            ) : null}
+
+            {/* Try this dish */}
+            {!alreadyLogged && !isOwner && (
+              <button
+                onClick={() => tryFileRef.current?.click()}
+                disabled={tryLoading}
+                className="ml-auto flex items-center gap-1.5 bg-orange-50 border border-orange-200 rounded-full px-4 py-2 active:bg-orange-100 transition-colors"
+              >
+                <Camera className="h-4 w-4 text-orange-500" />
+                <span className="text-sm font-semibold text-orange-600">
+                  {tryLoading ? "Adding…" : "I've tried this"}
+                </span>
+              </button>
+            )}
+
+            {/* Add another photo */}
+            {alreadyLogged && (
+              <button
+                onClick={() => tryFileRef.current?.click()}
+                disabled={tryLoading}
+                className="ml-auto flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-4 py-2 active:bg-gray-100 transition-colors"
+              >
+                <Plus className="h-4 w-4 text-gray-500" />
+                <span className="text-sm font-semibold text-gray-600">
+                  {tryLoading ? "Adding…" : "Add photo"}
+                </span>
+              </button>
+            )}
+
+            <input
+              ref={tryFileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleTry}
+            />
+          </div>
+
+          {dish.isPrivate && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+              <Lock className="h-3 w-3" /> Private — only visible to you
+            </div>
+          )}
+
+          <div className="h-px bg-gray-100" />
+
+          {/* Comments */}
+          <div id="comments" ref={commentsRef} className="space-y-3 pb-4">
+            <h2 className="font-bold text-base">
+              {comments.length > 0 ? `${comments.length} comment${comments.length !== 1 ? "s" : ""}` : "Comments"}
+            </h2>
+
+            {comments.length === 0 && (
+              <p className="text-sm text-gray-400">No comments yet. Be the first!</p>
+            )}
+
+            {comments.map((comment) => {
+              const commentUser = commentUsers[comment.userId];
+              return (
+                <div key={comment.id} className="flex gap-2.5">
+                  <Avatar className="h-7 w-7 shrink-0">
+                    <AvatarImage src={commentUser?.photoURL} />
+                    <AvatarFallback className="text-[10px]">{commentUser?.displayName?.[0] ?? "?"}</AvatarFallback>
+                  </Avatar>
+                  <div className="bg-gray-50 rounded-2xl rounded-tl-none px-3 py-2 flex-1">
+                    <span className="text-xs font-semibold text-gray-700">{commentUser?.displayName ?? "User"} </span>
+                    <span className="text-sm text-gray-700">{comment.text}</span>
+                  </div>
                 </div>
               );
             })}
-          </div>
-        ) : (
-          <div className="aspect-square bg-gray-100 flex items-center justify-center text-7xl">🍽️</div>
-        )}
 
-        {/* Back */}
-        <button
-          onClick={() => router.back()}
-          className="absolute top-12 left-4 bg-black/40 backdrop-blur-sm rounded-full p-2"
-        >
-          <ChevronLeft className="h-5 w-5 text-white" />
-        </button>
-
-        {/* Tier badge */}
-        <div className={`absolute top-12 right-4 ${tier.color} rounded-full h-12 w-12 flex flex-col items-center justify-center shadow-lg`}>
-          <span className="text-white text-xs font-bold leading-none">{tier.label}</span>
-          <span className="text-white text-[10px] leading-none opacity-90">{rating}</span>
-        </div>
-
-        {/* Photo count indicator */}
-        {logs.length > 1 && (
-          <div className="absolute bottom-3 right-3 bg-black/40 backdrop-blur-sm rounded-full px-2 py-1">
-            <span className="text-white text-xs font-medium">{logs.length} photos</span>
-          </div>
-        )}
-      </div>
-
-      {/* Content */}
-      <div className="px-4 pt-4 space-y-4">
-        {/* Title row */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold leading-tight">{dish.name}</h1>
-            {creator && (
-              <Link href={`/profile/${creator.handle}`} className="flex items-center gap-2 mt-1.5">
-                <Avatar className="h-5 w-5">
-                  <AvatarImage src={creator.photoURL} />
-                  <AvatarFallback className="text-[10px]">{creator.displayName?.[0]}</AvatarFallback>
-                </Avatar>
-                <span className="text-sm text-gray-500">{creator.displayName}</span>
-              </Link>
-            )}
-          </div>
-          {/* Owner controls */}
-          {isOwner && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handlePrivacyToggle}
-                className="p-2 rounded-full bg-gray-100 text-gray-500"
-                title={dish.isPrivate ? "Make public" : "Make private"}
-              >
-                {dish.isPrivate ? <Lock className="h-4 w-4" /> : <Globe className="h-4 w-4" />}
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleteLoading}
-                className="p-2 rounded-full bg-red-50 text-red-400 disabled:opacity-50"
-                title="Delete dish"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {dish.notes && (
-          <p className="text-gray-600 text-sm leading-relaxed">{dish.notes}</p>
-        )}
-
-        {dish.recipeLink && (
-          <a
-            href={dish.recipeLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-sm text-orange-500 font-medium"
-          >
-            <ExternalLink className="h-4 w-4" /> View recipe
-          </a>
-        )}
-
-        {/* Actions */}
-        <div className="flex items-center gap-3 py-1">
-          <button onClick={handleLike} className="flex items-center gap-1.5">
-            <Heart className={`h-6 w-6 ${liked ? "fill-red-500 text-red-500" : "text-gray-400"}`} />
-            {likesCount > 0 && <span className="text-sm text-gray-600">{likesCount}</span>}
-          </button>
-          <button onClick={handleSave} className="flex items-center gap-1.5">
-            <Bookmark className={`h-6 w-6 ${saved ? "fill-orange-500 text-orange-500" : "text-gray-400"}`} />
-          </button>
-
-          {/* Try this dish */}
-          {!alreadyLogged && !isOwner && (
-            <button
-              onClick={() => tryFileRef.current?.click()}
-              disabled={tryLoading}
-              className="ml-auto flex items-center gap-1.5 bg-orange-50 border border-orange-200 rounded-full px-4 py-2"
-            >
-              <Camera className="h-4 w-4 text-orange-500" />
-              <span className="text-sm font-semibold text-orange-600">
-                {tryLoading ? "Adding…" : "I've tried this"}
-              </span>
-            </button>
-          )}
-
-          {/* Add another photo (owner or already tried) */}
-          {alreadyLogged && (
-            <button
-              onClick={() => tryFileRef.current?.click()}
-              disabled={tryLoading}
-              className="ml-auto flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-full px-4 py-2"
-            >
-              <Plus className="h-4 w-4 text-gray-500" />
-              <span className="text-sm font-semibold text-gray-600">
-                {tryLoading ? "Adding…" : "Add photo"}
-              </span>
-            </button>
-          )}
-
-          <input
-            ref={tryFileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleTry}
-          />
-        </div>
-
-        {/* Privacy badge */}
-        {dish.isPrivate && (
-          <div className="flex items-center gap-1.5 text-xs text-gray-400">
-            <Lock className="h-3 w-3" /> Private — only visible to you
-          </div>
-        )}
-
-        <div className="h-px bg-gray-100" />
-
-        {/* Comments */}
-        <div id="comments" ref={commentsRef} className="space-y-3 pb-4">
-          <h2 className="font-bold text-base">Comments {comments.length > 0 && `(${comments.length})`}</h2>
-
-          {comments.length === 0 && (
-            <p className="text-sm text-gray-400">No comments yet. Be the first!</p>
-          )}
-
-          {comments.map((comment) => {
-            const commentUser = commentUsers[comment.userId];
-            return (
-              <div key={comment.id} className="flex gap-2.5">
-                <Avatar className="h-7 w-7 shrink-0">
-                  <AvatarImage src={commentUser?.photoURL} />
-                  <AvatarFallback className="text-[10px]">{commentUser?.displayName?.[0] ?? "?"}</AvatarFallback>
-                </Avatar>
-                <div className="bg-gray-50 rounded-2xl rounded-tl-none px-3 py-2 flex-1">
-                  <span className="text-xs font-semibold text-gray-700">{commentUser?.displayName ?? "User"} </span>
-                  <span className="text-sm text-gray-700">{comment.text}</span>
-                </div>
+            {/* Comment input */}
+            <form onSubmit={handleComment} className="flex gap-2 items-end pt-1">
+              <Avatar className="h-7 w-7 shrink-0">
+                <AvatarImage src={user?.photoURL ?? ""} />
+                <AvatarFallback className="text-[10px]">{user?.displayName?.[0] ?? "?"}</AvatarFallback>
+              </Avatar>
+              <div className="flex-1 flex gap-2 bg-gray-100 rounded-2xl px-3 py-2 items-center">
+                <input
+                  type="text"
+                  placeholder="Add a comment…"
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400"
+                />
+                <button
+                  type="submit"
+                  disabled={submitting || !commentText.trim()}
+                  className="text-orange-500 disabled:opacity-30 active:scale-90 transition-transform"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
               </div>
-            );
-          })}
-
-          {/* Comment input */}
-          <form onSubmit={handleComment} className="flex gap-2 items-end pt-1">
-            <Avatar className="h-7 w-7 shrink-0">
-              <AvatarImage src={user?.photoURL ?? ""} />
-              <AvatarFallback className="text-[10px]">{user?.displayName?.[0] ?? "?"}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1 flex gap-2 bg-gray-100 rounded-2xl px-3 py-2 items-center">
-              <input
-                type="text"
-                placeholder="Add a comment…"
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400"
-              />
-              <button
-                type="submit"
-                disabled={submitting || !commentText.trim()}
-                className="text-orange-500 disabled:opacity-30"
-              >
-                <Send className="h-4 w-4" />
-              </button>
-            </div>
-          </form>
+            </form>
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -395,6 +395,14 @@ export async function isLiked(uid: string, dishId: string): Promise<boolean> {
   return snap.exists();
 }
 
+export async function getLikers(dishId: string): Promise<UserDoc[]> {
+  const q = query(collection(db, "likes"), where("dishId", "==", dishId));
+  const snaps = await getDocs(q);
+  const uids = snaps.docs.map((d) => d.data().userId as string);
+  const users = await Promise.all(uids.map((uid) => getUserByUid(uid)));
+  return users.filter(Boolean) as UserDoc[];
+}
+
 // ─── Saves ────────────────────────────────────────────────────────────────────
 
 export async function toggleSave(uid: string, dishId: string): Promise<boolean> {
@@ -433,6 +441,87 @@ export async function getComments(dishId: string): Promise<CommentDoc[]> {
   );
   const snaps = await getDocs(q);
   return snaps.docs.map((d) => ({ id: d.id, ...d.data() } as CommentDoc));
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+export interface NotificationDoc {
+  id: string;
+  toUid: string;
+  fromUid: string;
+  fromDisplayName: string;
+  fromPhotoURL: string;
+  type: "like" | "comment";
+  dishId: string;
+  dishName: string;
+  read: boolean;
+  createdAt: Timestamp | null;
+}
+
+export async function createNotification(data: {
+  toUid: string;
+  fromUid: string;
+  fromDisplayName: string;
+  fromPhotoURL: string;
+  type: "like" | "comment";
+  dishId: string;
+  dishName: string;
+}): Promise<void> {
+  // Don't notify yourself
+  if (data.toUid === data.fromUid) return;
+  await addDoc(collection(db, "notifications"), {
+    ...data,
+    read: false,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function getNotifications(uid: string): Promise<NotificationDoc[]> {
+  const q = query(
+    collection(db, "notifications"),
+    where("toUid", "==", uid),
+    orderBy("createdAt", "desc"),
+    limit(50)
+  );
+  const snaps = await getDocs(q);
+  return snaps.docs.map((d) => ({ id: d.id, ...d.data() } as NotificationDoc));
+}
+
+export async function markNotificationsRead(uid: string): Promise<void> {
+  const q = query(
+    collection(db, "notifications"),
+    where("toUid", "==", uid),
+    where("read", "==", false)
+  );
+  const snaps = await getDocs(q);
+  await Promise.all(snaps.docs.map((d) => updateDoc(d.ref, { read: true })));
+}
+
+export async function getUnreadNotificationCount(uid: string): Promise<number> {
+  const q = query(
+    collection(db, "notifications"),
+    where("toUid", "==", uid),
+    where("read", "==", false)
+  );
+  const snaps = await getDocs(q);
+  return snaps.size;
+}
+
+// ─── Push subscriptions ───────────────────────────────────────────────────────
+
+export async function savePushSubscription(
+  uid: string,
+  subscription: PushSubscription
+): Promise<void> {
+  await setDoc(doc(db, "pushSubscriptions", uid), {
+    uid,
+    subscription: JSON.parse(JSON.stringify(subscription)),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function removePushSubscription(uid: string): Promise<void> {
+  await deleteDoc(doc(db, "pushSubscriptions", uid));
 }
 
 // ─── Legacy: user ELOs (kept for any existing data) ──────────────────────────

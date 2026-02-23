@@ -41,3 +41,58 @@ body {
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
 }
+
+/* Scrollbar hide utility */
+.scrollbar-hide { scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* Page entrance animation */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: page-in 0.25s ease-out both;
+}
+
+/* Card stagger animation */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.card-enter {
+  animation: card-in 0.3s ease-out both;
+}
+
+/* Fade in */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fade-in {
+  animation: fade-in 0.2s ease-out both;
+}
+
+/* Score badge pulse when updated */
+@keyframes score-pop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+.score-pop {
+  animation: score-pop 0.3s ease-out;
+}
+
+/* Notification badge bounce */
+@keyframes badge-in {
+  0%   { transform: scale(0); }
+  60%  { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+.badge-enter {
+  animation: badge-in 0.25s ease-out both;
+}
+
+/* Smooth tap feedback */
+.tap-scale { transition: transform 0.1s ease-out; }
+.tap-scale:active { transform: scale(0.95); }

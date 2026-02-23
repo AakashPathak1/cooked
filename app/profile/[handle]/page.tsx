@@ -8,10 +8,9 @@ import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { getUserByHandle, getPersonalDishes, UserDoc, DishDoc } from "@/lib/firestore";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { TierList } from "@/components/TierList";
-import { eloTier, eloToRating } from "@/lib/eloDisplay";
+import { eloToRating } from "@/lib/eloDisplay";
 
-type Tab = "grid" | "tierlist";
+type SortMode = "date" | "score";
 
 export default function ProfilePage() {
   const { handle } = useParams<{ handle: string }>();
@@ -21,7 +20,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserDoc | null>(null);
   const [dishes, setDishes] = useState<DishDoc[]>([]);
   const [fetching, setFetching] = useState(true);
-  const [tab, setTab] = useState<Tab>("grid");
+  const [sort, setSort] = useState<SortMode>("score");
 
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
@@ -33,7 +32,6 @@ export default function ProfilePage() {
       const u = await getUserByHandle(handle as string);
       if (!u) { setFetching(false); return; }
       setProfile(u);
-      // Show their public personal dishes (their personalElo on each)
       const d = await getPersonalDishes(u.uid, true);
       setDishes(d);
       setFetching(false);
@@ -57,91 +55,96 @@ export default function ProfilePage() {
     );
   }
 
-  const bestScore = dishes.length > 0
-    ? Math.max(...dishes.map((d) => d.personalElo ?? d.globalScore ?? 1200))
-    : null;
+  const soloDishes = dishes.filter((d) => d.role === "creator");
+  const taggedDishes = dishes.filter((d) => d.role === "tagged" || d.role === "tried");
+
+  const sorted = [...dishes].sort((a, b) => {
+    if (sort === "score") {
+      const sa = a.personalElo ?? a.globalScore ?? 1200;
+      const sb = b.personalElo ?? b.globalScore ?? 1200;
+      return sb - sa;
+    }
+    // date: newest first
+    const ta = a.createdAt?.toMillis?.() ?? 0;
+    const tb = b.createdAt?.toMillis?.() ?? 0;
+    return tb - ta;
+  });
 
   return (
-    <div className="mb-nav">
-      {/* Header */}
-      <div className="sticky top-0 bg-white/90 backdrop-blur-sm z-40 px-4 pt-12 pb-3 border-b border-gray-100">
+    <div className="mb-nav page-enter">
+      {/* Sticky header */}
+      <div className="sticky top-0 bg-white/95 backdrop-blur-md z-40 px-4 pt-12 pb-3 border-b border-gray-100">
         <h1 className="text-xl font-bold">@{profile.handle}</h1>
       </div>
 
       {/* Profile info */}
       <div className="px-4 pt-5 pb-4 flex items-center gap-4">
-        <Avatar className="h-20 w-20 border-2 border-gray-100">
+        <Avatar className="h-20 w-20 ring-2 ring-orange-100">
           <AvatarImage src={profile.photoURL} />
-          <AvatarFallback className="text-2xl">{profile.displayName?.[0] ?? "U"}</AvatarFallback>
+          <AvatarFallback className="text-2xl bg-orange-100 text-orange-600">
+            {profile.displayName?.[0] ?? "U"}
+          </AvatarFallback>
         </Avatar>
         <div className="flex-1">
           <h2 className="text-lg font-bold">{profile.displayName}</h2>
-          <div className="flex gap-5 mt-2">
+          <div className="flex gap-6 mt-2">
             <div className="text-center">
-              <p className="font-bold text-lg leading-tight">{dishes.length}</p>
-              <p className="text-xs text-gray-400">dishes</p>
+              <p className="font-bold text-lg leading-tight">{soloDishes.length}</p>
+              <p className="text-[10px] text-gray-400 leading-tight">Solo</p>
             </div>
-            {bestScore !== null && (
-              <div className="text-center">
-                <p className="font-bold text-lg leading-tight">{eloToRating(bestScore)}</p>
-                <p className="text-xs text-gray-400">best</p>
-              </div>
-            )}
+            <div className="text-center">
+              <p className="font-bold text-lg leading-tight">{taggedDishes.length}</p>
+              <p className="text-[10px] text-gray-400 leading-tight">Tagged</p>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-gray-100 px-4">
+      {/* Sort toggle */}
+      <div className="flex items-center gap-2 px-4 pb-3">
         <button
-          onClick={() => setTab("grid")}
-          className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${tab === "grid" ? "text-orange-500 border-b-2 border-orange-500" : "text-gray-400"}`}
+          onClick={() => setSort("score")}
+          className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${sort === "score" ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-500"}`}
         >
-          Dishes
+          By score
         </button>
         <button
-          onClick={() => setTab("tierlist")}
-          className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${tab === "tierlist" ? "text-orange-500 border-b-2 border-orange-500" : "text-gray-400"}`}
+          onClick={() => setSort("date")}
+          className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-colors ${sort === "date" ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-500"}`}
         >
-          Tier List
+          By date
         </button>
       </div>
 
-      <div className="px-4 pt-3">
-        {tab === "grid" && (
-          <>
-            {dishes.length === 0 ? (
-              <div className="text-center py-16">
-                <p className="text-3xl mb-2">🍽️</p>
-                <p className="text-gray-400 text-sm">No public dishes yet.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-0.5">
-                {dishes.map((dish) => {
-                  const score = dish.personalElo ?? dish.globalScore ?? 1200;
-                  const tier = eloTier(score);
-                  return (
-                    <Link key={dish.id} href={`/dish/${dish.id}`}>
-                      <div className="relative aspect-square bg-gray-100">
-                        {dish.coverPhotoURL ? (
-                          <img src={dish.coverPhotoURL} alt={dish.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-2xl">🍽️</div>
-                        )}
-                        <div className={`absolute bottom-1 right-1 ${tier.color} rounded-full h-6 w-6 flex items-center justify-center shadow`}>
-                          <span className="text-white text-[8px] font-bold">{tier.label}</span>
-                        </div>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
-
-        {tab === "tierlist" && <TierList dishes={dishes} />}
-      </div>
+      {/* Photo grid */}
+      {sorted.length === 0 ? (
+        <div className="text-center py-16">
+          <p className="text-3xl mb-2">🍽️</p>
+          <p className="text-gray-400 text-sm">No public dishes yet.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-0.5">
+          {sorted.map((dish) => {
+            const dishScore = dish.personalElo ?? dish.globalScore ?? 1200;
+            const rating = eloToRating(dishScore);
+            return (
+              <Link key={dish.id} href={`/dish/${dish.id}`}>
+                <div className="relative aspect-square bg-gray-100 active:opacity-80 transition-opacity">
+                  {dish.coverPhotoURL ? (
+                    <img src={dish.coverPhotoURL} alt={dish.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-2xl">🍽️</div>
+                  )}
+                  {/* Beli-style score badge */}
+                  <div className="absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shadow">
+                    <span className="text-white text-[10px] font-bold">{rating}</span>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
