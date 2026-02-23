@@ -278,41 +278,47 @@ export default function DishPage() {
       {/* Likers modal */}
       {showLikersModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-end"
+          className="fixed inset-0 z-50 bg-black/50"
           onClick={() => setShowLikersModal(false)}
         >
           <div
-            className="w-full max-w-lg mx-auto bg-white rounded-t-3xl p-5 pb-safe max-h-[60vh] overflow-y-auto"
+            className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="flex items-center justify-between px-5 pt-2 pb-3">
               <h2 className="font-bold text-lg">
                 {likesCount} like{likesCount !== 1 ? "s" : ""}
               </h2>
-              <button onClick={() => setShowLikersModal(false)}>
+              <button onClick={() => setShowLikersModal(false)} className="p-1">
                 <X className="h-5 w-5 text-gray-400" />
               </button>
             </div>
-            {likers.length === 0 ? (
-              <p className="text-center text-gray-400 py-8 text-sm">No likes yet</p>
-            ) : (
-              <div className="space-y-3">
-                {likers.map((u) => (
-                  <Link key={u.uid} href={`/profile/${u.handle}`} onClick={() => setShowLikersModal(false)}>
-                    <div className="flex items-center gap-3 active:opacity-70 transition-opacity">
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={u.photoURL} />
-                        <AvatarFallback className="bg-orange-100 text-orange-600 font-semibold">{u.displayName?.[0]}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-semibold text-sm">{u.displayName}</p>
-                        <p className="text-xs text-gray-400">@{u.handle}</p>
+            <div className="px-5 pb-10 max-h-[60vh] overflow-y-auto">
+              {likers.length === 0 ? (
+                <p className="text-center text-gray-400 py-8 text-sm">No likes yet</p>
+              ) : (
+                <div className="space-y-4">
+                  {likers.map((u) => (
+                    <Link key={u.uid} href={`/profile/${u.handle}`} onClick={() => setShowLikersModal(false)}>
+                      <div className="flex items-center gap-3 active:opacity-70 transition-opacity">
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={u.photoURL} />
+                          <AvatarFallback className="bg-orange-100 text-orange-600 font-semibold">{u.displayName?.[0]}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-semibold text-sm">{u.displayName}</p>
+                          <p className="text-xs text-gray-400">@{u.handle}</p>
+                        </div>
                       </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

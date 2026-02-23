@@ -384,7 +384,7 @@ export async function toggleLike(uid: string, dishId: string): Promise<boolean> 
     await updateDoc(dishRef, { likesCount: increment(-1) });
     return false;
   } else {
-    await setDoc(ref, { userId: uid, dishId });
+    await setDoc(ref, { userId: uid, dishId, createdAt: serverTimestamp() });
     await updateDoc(dishRef, { likesCount: increment(1) });
     return true;
   }
@@ -401,6 +401,106 @@ export async function getLikers(dishId: string): Promise<UserDoc[]> {
   const uids = snaps.docs.map((d) => d.data().userId as string);
   const users = await Promise.all(uids.map((uid) => getUserByUid(uid)));
   return users.filter(Boolean) as UserDoc[];
+}
+
+// ─── Activity feed ────────────────────────────────────────────────────────────
+
+export interface ActivityItem {
+  id: string;
+  type: "like" | "comment";
+  fromUid: string;
+  fromDisplayName: string;
+  fromPhotoURL: string;
+  dishId: string;
+  dishName: string;
+  commentText?: string;
+  createdAt: Timestamp | null;
+}
+
+export async function getActivityForUser(uid: string): Promise<ActivityItem[]> {
+  // Get user's created dishes
+  const dishSnaps = await getDocs(
+    query(collection(db, "dishes"), where("creatorId", "==", uid))
+  );
+  const dishes = dishSnaps.docs.map((d) => ({ id: d.id, ...d.data() } as DishDoc));
+  if (dishes.length === 0) return [];
+
+  const dishIds = dishes.map((d) => d.id);
+  const dishNameMap: Record<string, string> = {};
+  dishes.forEach((d) => { dishNameMap[d.id] = d.name; });
+
+  // Firestore 'in' supports up to 10 items — chunk accordingly
+  const chunks: string[][] = [];
+  for (let i = 0; i < dishIds.length; i += 10) chunks.push(dishIds.slice(i, i + 10));
+
+  const [likeSnaps, commentSnaps] = await Promise.all([
+    Promise.all(chunks.map((chunk) =>
+      getDocs(query(collection(db, "likes"), where("dishId", "in", chunk)))
+    )).then((res) => res.flatMap((r) => r.docs)),
+    Promise.all(chunks.map((chunk) =>
+      getDocs(query(collection(db, "comments"), where("dishId", "in", chunk)))
+    )).then((res) => res.flatMap((r) => r.docs)),
+  ]);
+
+  // Filter out the owner's own activity
+  const likes = likeSnaps.filter((d) => d.data().userId !== uid);
+  const comments = commentSnaps.filter((d) => d.data().userId !== uid);
+
+  // Fetch user data for all actors
+  const actorUids = Array.from(new Set([
+    ...likes.map((d) => d.data().userId as string),
+    ...comments.map((d) => d.data().userId as string),
+  ]));
+  const userMap: Record<string, UserDoc> = {};
+  await Promise.all(actorUids.map(async (actorUid) => {
+    const u = await getUserByUid(actorUid);
+    if (u) userMap[actorUid] = u;
+  }));
+
+  const activities: ActivityItem[] = [];
+
+  for (const snap of likes) {
+    const data = snap.data();
+    const fromUser = userMap[data.userId];
+    if (!fromUser) continue;
+    activities.push({
+      id: snap.id,
+      type: "like",
+      fromUid: data.userId,
+      fromDisplayName: fromUser.displayName || fromUser.handle,
+      fromPhotoURL: fromUser.photoURL || "",
+      dishId: data.dishId,
+      dishName: dishNameMap[data.dishId] ?? "",
+      createdAt: (data.createdAt as Timestamp) ?? null,
+    });
+  }
+
+  for (const snap of comments) {
+    const data = snap.data();
+    const fromUser = userMap[data.userId];
+    if (!fromUser) continue;
+    activities.push({
+      id: snap.id,
+      type: "comment",
+      fromUid: data.userId,
+      fromDisplayName: fromUser.displayName || fromUser.handle,
+      fromPhotoURL: fromUser.photoURL || "",
+      dishId: data.dishId,
+      dishName: dishNameMap[data.dishId] ?? "",
+      commentText: data.text,
+      createdAt: (data.createdAt as Timestamp) ?? null,
+    });
+  }
+
+  // Sort by createdAt desc; items with no timestamp go last
+  activities.sort((a, b) => {
+    if (!a.createdAt && !b.createdAt) return 0;
+    if (!a.createdAt) return 1;
+    if (!b.createdAt) return -1;
+    return b.createdAt.toMillis() - a.createdAt.toMillis();
+  });
+
+  return activities.slice(0, 100);
 }
 
 // ─── Saves ────────────────────────────────────────────────────────────────────
