@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Users, User, Plus } from "lucide-react";
+import { Home, Users, User, Plus, Bell } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useEffect, useState } from "react";
 import { getUnreadNotificationCount } from "@/lib/firestore";
@@ -38,7 +38,7 @@ export function BottomNav() {
 
         <NavTab
           href="/notifications"
-          icon={User}
+          icon={Bell}
           label="Activity"
           active={pathname === "/notifications"}
           unread={unread}
