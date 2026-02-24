@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   getDish,
   getDishLogs,
+  createDishLog,
   deleteDishLog,
   deleteDish,
   updateDish,
@@ -21,6 +22,7 @@ import {
   getAllUsers,
   getComments,
   addComment,
+  deleteComment,
   toggleLike,
   isLiked,
   getLikers,
@@ -36,7 +38,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Heart, ExternalLink, Send, ChevronLeft,
   Trash2, Lock, Globe, X, Pencil, Check, Search,
-  PenLine, RotateCcw, ImageIcon,
+  PenLine, RotateCcw, ImageIcon, Plus,
 } from "lucide-react";
 import { eloToRating, scoreColor } from "@/lib/eloDisplay";
 import { QUICK_RATING_OPTIONS, QUICK_RATINGS, QuickRating } from "@/lib/elo";
@@ -85,6 +87,10 @@ export default function DishPage() {
   const [showRerankQuickRate, setShowRerankQuickRate] = useState(false);
   const [selectedRerankRate, setSelectedRerankRate] = useState<QuickRating | null>(null);
   const [rerankLoading, setRerankLoading] = useState(false);
+
+  // Add photo state (owner only)
+  const addPhotoRef = useRef<HTMLInputElement>(null);
+  const [addingPhoto, setAddingPhoto] = useState(false);
 
   // Edit dish state (owner only)
   const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -226,6 +232,16 @@ export default function DishPage() {
     if (u) setCommentUsers((m) => ({ ...m, [user.uid]: u }));
   }
 
+  async function handleDeleteComment(commentId: string) {
+    if (!user) return;
+    try {
+      await deleteComment(commentId, user.uid);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   async function handleDeleteLog(logId: string) {
     if (!user || !dish) return;
     if (!confirm("Remove this photo?")) return;
@@ -233,11 +249,47 @@ export default function DishPage() {
       await deleteDishLog(logId, dish.id, user.uid);
       const updatedLogs = await getDishLogs(dish.id);
       const newCover = updatedLogs[updatedLogs.length - 1]?.photoURL ?? "";
+      const newIndex = Math.min(currentPhotoIndex, Math.max(0, updatedLogs.length - 1));
       setLogs(updatedLogs);
       setDish((d) => d ? { ...d, coverPhotoURL: newCover } : d);
+      setCurrentPhotoIndex(newIndex);
+      setTimeout(() => {
+        if (photoScrollRef.current) {
+          photoScrollRef.current.scrollTo({ left: newIndex * photoScrollRef.current.offsetWidth });
+        }
+      }, 0);
     } catch (err) {
       console.error(err);
       alert("Failed to remove photo.");
+    }
+  }
+
+  async function handleAddPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f || !user || !dish) return;
+    setAddingPhoto(true);
+    try {
+      const photoURL = await compressImageToBase64(f);
+      await createDishLog(dish.id, user.uid, photoURL);
+      const updatedLogs = await getDishLogs(dish.id);
+      setLogs(updatedLogs);
+      setDish((d) => d ? { ...d, coverPhotoURL: photoURL } : d);
+      const newIndex = updatedLogs.length - 1;
+      setCurrentPhotoIndex(newIndex);
+      setTimeout(() => {
+        if (photoScrollRef.current) {
+          photoScrollRef.current.scrollTo({
+            left: newIndex * photoScrollRef.current.offsetWidth,
+            behavior: "smooth",
+          });
+        }
+      }, 100);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to add photo.");
+    } finally {
+      setAddingPhoto(false);
+      if (addPhotoRef.current) addPhotoRef.current.value = "";
     }
   }
 
@@ -816,7 +868,7 @@ export default function DishPage() {
       )}
 
       <div className="mb-nav">
-        {/* Photo scroll */}
+        {/* Photo carousel */}
         <div className="relative">
           {logs.length > 0 ? (
             <div
@@ -830,24 +882,31 @@ export default function DishPage() {
               {logs.map((log) => {
                 const uploader = logUsers[log.userId];
                 return (
-                  <div key={log.id} className="relative shrink-0 w-full aspect-square bg-gray-100 snap-start">
+                  <div key={log.id} className="relative shrink-0 w-full aspect-square bg-gray-100 snap-start overflow-hidden">
                     <img src={log.photoURL} alt={dish.name} className="w-full h-full object-cover" />
+
+                    {/* Bottom gradient scrim */}
+                    <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
+
+                    {/* Uploader pill */}
                     {uploader && (
-                      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full px-2 py-1">
-                        <Avatar className="h-5 w-5">
+                      <div className="absolute bottom-3.5 left-3.5 flex items-center gap-2 bg-black/35 backdrop-blur-sm rounded-full pl-1 pr-3 py-1">
+                        <Avatar className="h-6 w-6 ring-1 ring-white/30">
                           <AvatarImage src={uploader.photoURL} />
-                          <AvatarFallback className="text-[8px]">{uploader.displayName?.[0]}</AvatarFallback>
+                          <AvatarFallback className="text-[9px] bg-gray-600 text-white">{uploader.displayName?.[0]}</AvatarFallback>
                         </Avatar>
-                        <span className="text-white text-xs font-medium">{uploader.displayName}</span>
-                        {isOwner && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDeleteLog(log.id!); }}
-                            className="ml-0.5 p-0.5 rounded-full hover:bg-white/20 active:bg-white/30 transition-colors"
-                          >
-                            <Trash2 className="h-3 w-3 text-white/80" />
-                          </button>
-                        )}
+                        <span className="text-white text-xs font-semibold leading-none">{uploader.displayName}</span>
                       </div>
+                    )}
+
+                    {/* Delete button — dish owner only, when more than 1 photo */}
+                    {isOwner && logs.length > 1 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteLog(log.id!); }}
+                        className="absolute bottom-3 right-3 bg-black/40 backdrop-blur-sm rounded-full p-2.5 active:bg-red-500/70 transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4 text-white" />
+                      </button>
                     )}
                   </div>
                 );
@@ -857,6 +916,7 @@ export default function DishPage() {
             <div className="aspect-square bg-gray-100 flex items-center justify-center text-7xl">🍽️</div>
           )}
 
+          {/* Back button */}
           <button
             onClick={() => router.back()}
             className="absolute top-12 left-4 bg-black/40 backdrop-blur-sm rounded-full p-2"
@@ -864,6 +924,7 @@ export default function DishPage() {
             <ChevronLeft className="h-5 w-5 text-white" />
           </button>
 
+          {/* Score badge */}
           <div
             className="absolute top-12 right-4 rounded-full h-12 w-12 flex items-center justify-center shadow-lg"
             style={{ backgroundColor: scoreColor(score) }}
@@ -871,8 +932,9 @@ export default function DishPage() {
             <span className="text-white text-sm font-bold">{eloToRating(score)}</span>
           </div>
 
+          {/* Pagination dots — above the bottom pills */}
           {logs.length > 1 && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+            <div className="absolute bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
               {logs.map((_, i) => (
                 <button
                   key={i}
@@ -880,12 +942,46 @@ export default function DishPage() {
                     photoScrollRef.current?.scrollTo({ left: i * photoScrollRef.current!.offsetWidth, behavior: "smooth" });
                     setCurrentPhotoIndex(i);
                   }}
-                  className={`rounded-full transition-all duration-200 ${i === currentPhotoIndex ? "w-4 h-2 bg-white" : "w-2 h-2 bg-white/50"}`}
+                  className={`rounded-full transition-all duration-300 ${
+                    i === currentPhotoIndex
+                      ? "w-5 h-2 bg-white shadow-sm"
+                      : "w-2 h-2 bg-white/50"
+                  }`}
                 />
               ))}
             </div>
           )}
         </div>
+
+        {/* Add photo — owner only */}
+        {isOwner && (
+          <div className="px-4 pt-3 pb-0.5">
+            <button
+              onClick={() => addPhotoRef.current?.click()}
+              disabled={addingPhoto}
+              className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-gray-300 rounded-2xl text-sm text-gray-500 font-medium active:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              {addingPhoto ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                  <span>Adding photo…</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4" />
+                  <span>Add photo</span>
+                </>
+              )}
+            </button>
+            <input
+              ref={addPhotoRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleAddPhoto}
+            />
+          </div>
+        )}
 
         {/* Content */}
         <div className="px-4 pt-4 space-y-4">
@@ -1041,15 +1137,26 @@ export default function DishPage() {
             )}
             {comments.map((comment) => {
               const commentUser = commentUsers[comment.userId];
+              const isMyComment = comment.userId === user?.uid;
               return (
-                <div key={comment.id} className="flex gap-2.5">
+                <div key={comment.id} className="flex gap-2.5 group">
                   <Avatar className="h-7 w-7 shrink-0">
                     <AvatarImage src={commentUser?.photoURL} />
                     <AvatarFallback className="text-[10px]">{commentUser?.displayName?.[0] ?? "?"}</AvatarFallback>
                   </Avatar>
-                  <div className="bg-gray-50 rounded-2xl rounded-tl-none px-3 py-2 flex-1">
-                    <span className="text-xs font-semibold text-gray-700">{commentUser?.displayName ?? "User"} </span>
-                    <span className="text-sm text-gray-700">{comment.text}</span>
+                  <div className="flex-1 flex items-start gap-1.5">
+                    <div className="bg-gray-50 rounded-2xl rounded-tl-none px-3 py-2 flex-1">
+                      <span className="text-xs font-semibold text-gray-700">{commentUser?.displayName ?? "User"} </span>
+                      <span className="text-sm text-gray-700">{comment.text}</span>
+                    </div>
+                    {isMyComment && (
+                      <button
+                        onClick={() => handleDeleteComment(comment.id!)}
+                        className="p-1.5 rounded-full text-gray-300 opacity-0 group-hover:opacity-100 active:opacity-100 active:text-red-400 transition-all mt-0.5 shrink-0"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               );

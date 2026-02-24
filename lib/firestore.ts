@@ -379,12 +379,18 @@ export async function updateDishTags(
   return added; // caller sends notifications to these
 }
 
-// Delete a dish log — only the dish owner can call this now
+// Delete a dish log — the photo uploader OR the dish owner can delete
 export async function deleteDishLog(logId: string, dishId: string, requestingUid: string): Promise<void> {
   const logRef = doc(db, "dishLogs", logId);
   const logSnap = await getDoc(logRef);
   if (!logSnap.exists()) return;
-  if (logSnap.data().userId !== requestingUid) throw new Error("Not authorized");
+
+  if (logSnap.data().userId !== requestingUid) {
+    const dishSnap = await getDoc(doc(db, "dishes", dishId));
+    if (!dishSnap.exists() || dishSnap.data().creatorId !== requestingUid) {
+      throw new Error("Not authorized");
+    }
+  }
 
   await deleteDoc(logRef);
 
@@ -640,6 +646,14 @@ export async function addComment(dishId: string, userId: string, text: string) {
     text,
     createdAt: serverTimestamp(),
   });
+}
+
+export async function deleteComment(commentId: string, requestingUid: string): Promise<void> {
+  const ref = doc(db, "comments", commentId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  if (snap.data().userId !== requestingUid) throw new Error("Not authorized");
+  await deleteDoc(ref);
 }
 
 export async function getComments(dishId: string): Promise<CommentDoc[]> {
