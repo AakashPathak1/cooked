@@ -276,6 +276,13 @@ export async function updateCreatorPhoto(
   });
 }
 
+export async function setCoverPhoto(dishId: string, userId: string, photoURL: string): Promise<void> {
+  const dishRef = doc(db, "dishes", dishId);
+  const snap = await getDoc(dishRef);
+  if (!snap.exists() || snap.data().creatorId !== userId) throw new Error("Not authorized");
+  await updateDoc(dishRef, { coverPhotoURL: photoURL });
+}
+
 export async function updateDishPrivacy(
   dishId: string,
   userId: string,

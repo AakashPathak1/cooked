@@ -15,6 +15,7 @@ import {
   updateDish,
   updateDishPrivacy,
   updateDishTags,
+  setCoverPhoto,
   updateCreatorPhoto,
   resetPersonalElo,
   acceptTag,
@@ -38,7 +39,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Heart, ExternalLink, Send, ChevronLeft,
   Trash2, Lock, Globe, X, Pencil, Check, Search,
-  PenLine, RotateCcw, ImageIcon, Plus,
+  PenLine, RotateCcw, ImageIcon, Plus, Star,
 } from "lucide-react";
 import { eloToRating, scoreColor } from "@/lib/eloDisplay";
 import { QUICK_RATING_OPTIONS, QUICK_RATINGS, QuickRating } from "@/lib/elo";
@@ -88,9 +89,10 @@ export default function DishPage() {
   const [selectedRerankRate, setSelectedRerankRate] = useState<QuickRating | null>(null);
   const [rerankLoading, setRerankLoading] = useState(false);
 
-  // Add photo state (owner only)
+  // Add photo / cover photo state (owner only)
   const addPhotoRef = useRef<HTMLInputElement>(null);
   const [addingPhoto, setAddingPhoto] = useState(false);
+  const [settingCover, setSettingCover] = useState(false);
 
   // Edit dish state (owner only)
   const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -239,6 +241,19 @@ export default function DishPage() {
       setComments((prev) => prev.filter((c) => c.id !== commentId));
     } catch (err) {
       console.error(err);
+    }
+  }
+
+  async function handleSetCover(photoURL: string) {
+    if (!user || !dish) return;
+    setSettingCover(true);
+    try {
+      await setCoverPhoto(dish.id, user.uid, photoURL);
+      setDish((d) => d ? { ...d, coverPhotoURL: photoURL } : d);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSettingCover(false);
     }
   }
 
@@ -897,6 +912,27 @@ export default function DishPage() {
                         </Avatar>
                         <span className="text-white text-xs font-semibold leading-none">{uploader.displayName}</span>
                       </div>
+                    )}
+
+                    {/* Cover photo badge / Set as cover button — owner, multi-photo */}
+                    {isOwner && logs.length > 1 && (
+                      log.photoURL === dish.coverPhotoURL ? (
+                        <div className="absolute top-[104px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/35 backdrop-blur-sm rounded-full px-3 py-1.5">
+                          <Star className="h-3 w-3 text-yellow-300 fill-yellow-300" />
+                          <span className="text-white text-xs font-semibold">Cover photo</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleSetCover(log.photoURL); }}
+                          disabled={settingCover}
+                          className="absolute top-[104px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full px-3 py-1.5 active:bg-black/60 transition-colors disabled:opacity-50"
+                        >
+                          <Star className="h-3 w-3 text-white/80" />
+                          <span className="text-white text-xs font-semibold">
+                            {settingCover ? "Setting…" : "Set as cover"}
+                          </span>
+                        </button>
+                      )
                     )}
 
                     {/* Delete button — dish owner only, when more than 1 photo */}
