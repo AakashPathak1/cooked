@@ -15,6 +15,7 @@ import {
   updateDishPrivacy,
   updateDishTags,
   updateCreatorPhoto,
+  resetPersonalElo,
   acceptTag,
   getPersonalDishes,
   getAllUsers,
@@ -79,6 +80,11 @@ export default function DishPage() {
   const [showQuickRate, setShowQuickRate] = useState(false);
   const [selectedQuickRate, setSelectedQuickRate] = useState<QuickRating | null>(null);
   const [accepting, setAccepting] = useState(false);
+
+  // Re-rank quick-rate state
+  const [showRerankQuickRate, setShowRerankQuickRate] = useState(false);
+  const [selectedRerankRate, setSelectedRerankRate] = useState<QuickRating | null>(null);
+  const [rerankLoading, setRerankLoading] = useState(false);
 
   // Edit dish state (owner only)
   const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -397,12 +403,25 @@ export default function DishPage() {
   }
 
   // ── Re-rank ──────────────────────────────────────────────────────────────────
-  async function handleRerank() {
-    if (!user || !dish) return;
-    const personal = await getPersonalDishes(user.uid);
-    if (personal.length >= 2) {
-      setRankingDishes(personal);
-      setShowRanking(true);
+  function handleRerank() {
+    setSelectedRerankRate(null);
+    setShowRerankQuickRate(true);
+  }
+
+  async function handleConfirmRerank() {
+    if (!user || !dish || !selectedRerankRate) return;
+    setRerankLoading(true);
+    setShowRerankQuickRate(false);
+    try {
+      await resetPersonalElo(user.uid, dish.id, QUICK_RATINGS[selectedRerankRate]);
+      const personal = await getPersonalDishes(user.uid);
+      if (personal.length >= 2) {
+        setRankingDishes(personal);
+        setShowRanking(true);
+      }
+    } finally {
+      setRerankLoading(false);
+      setSelectedRerankRate(null);
     }
   }
 
@@ -545,6 +564,57 @@ export default function DishPage() {
                 className="w-full py-4 bg-orange-500 text-white font-bold rounded-2xl text-base shadow-lg shadow-orange-200/50 disabled:opacity-40 disabled:shadow-none active:scale-[0.98] transition-all"
               >
                 {savingEdit ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Re-rank quick-rate sheet */}
+      {showRerankQuickRate && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center backdrop-enter"
+          onClick={() => setShowRerankQuickRate(false)}
+        >
+          <div
+            className="bg-white rounded-t-3xl w-full max-w-sm pb-10 sheet-enter"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+            <div className="flex items-center justify-between px-5 pt-2 pb-1">
+              <div>
+                <h2 className="font-bold text-base">How would you rate it now?</h2>
+                <p className="text-xs text-gray-400 mt-0.5">This resets your score anchor before re-ranking</p>
+              </div>
+              <button onClick={() => setShowRerankQuickRate(false)} className="p-1 -mr-1">
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 p-4">
+              {QUICK_RATING_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setSelectedRerankRate(opt.key)}
+                  className={`flex items-center gap-2.5 px-4 py-3.5 rounded-2xl border-2 transition-all text-left ${
+                    selectedRerankRate === opt.key
+                      ? "border-orange-500 bg-orange-50 text-orange-700"
+                      : "border-gray-200 bg-white text-gray-600 active:bg-gray-50"
+                  }`}
+                >
+                  <span className="text-2xl">{opt.emoji}</span>
+                  <span className="text-sm font-medium leading-tight">{opt.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="px-4">
+              <button
+                onClick={handleConfirmRerank}
+                disabled={!selectedRerankRate || rerankLoading}
+                className="w-full py-3.5 bg-orange-500 text-white font-semibold rounded-2xl text-sm shadow-lg shadow-orange-200/50 disabled:opacity-40 disabled:shadow-none active:scale-[0.98] transition-all"
+              >
+                {rerankLoading ? "Loading…" : "Start ranking"}
               </button>
             </div>
           </div>

@@ -335,6 +335,12 @@ export async function createDishLog(
   return ref.id;
 }
 
+// Resets a user's personal ELO for a dish (used for re-ranking).
+export async function resetPersonalElo(uid: string, dishId: string, initialElo: number): Promise<void> {
+  await setDoc(doc(db, "userDishElos", `${uid}_${dishId}`), { userId: uid, dishId, elo: initialElo });
+  await recomputeGlobalScore(dishId);
+}
+
 // Called when a tagged user accepts the tag. initialElo is their quick rating anchor.
 export async function acceptTag(uid: string, dishId: string, initialElo: number = DEFAULT_RATING): Promise<void> {
   await Promise.all([
