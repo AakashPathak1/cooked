@@ -231,6 +231,51 @@ export async function getPersonalDishes(
   return results;
 }
 
+export async function updateDish(
+  dishId: string,
+  requestingUid: string,
+  data: { name: string; notes: string; recipeLink: string }
+): Promise<void> {
+  const dishRef = doc(db, "dishes", dishId);
+  const snap = await getDoc(dishRef);
+  if (!snap.exists() || snap.data().creatorId !== requestingUid) throw new Error("Not authorized");
+  await updateDoc(dishRef, { name: data.name, notes: data.notes, recipeLink: data.recipeLink });
+}
+
+// Replace the creator's photo on a dish. Updates their dishLog and recomputes coverPhotoURL.
+export async function updateCreatorPhoto(
+  dishId: string,
+  userId: string,
+  photoURL: string
+): Promise<void> {
+  const q = query(
+    collection(db, "dishLogs"),
+    where("dishId", "==", dishId),
+    where("userId", "==", userId)
+  );
+  const snaps = await getDocs(q);
+  if (snaps.empty) {
+    await addDoc(collection(db, "dishLogs"), {
+      dishId, userId, photoURL, notes: "", createdAt: serverTimestamp(),
+    });
+  } else {
+    await updateDoc(snaps.docs[0].ref, { photoURL });
+  }
+  // Recompute cover from all logs (bypass cache)
+  const allLogs = await getDocsFromServer(
+    query(collection(db, "dishLogs"), where("dishId", "==", dishId))
+  );
+  const sorted = allLogs.docs
+    .map((d) => ({
+      photoURL: d.data().photoURL as string,
+      ts: (d.data().createdAt as Timestamp | null)?.toMillis() ?? 0,
+    }))
+    .sort((a, b) => b.ts - a.ts);
+  await updateDoc(doc(db, "dishes", dishId), {
+    coverPhotoURL: sorted[0]?.photoURL ?? photoURL,
+  });
+}
+
 export async function updateDishPrivacy(
   dishId: string,
   userId: string,

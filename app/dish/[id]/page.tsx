@@ -11,8 +11,10 @@ import {
   getDishLogs,
   deleteDishLog,
   deleteDish,
+  updateDish,
   updateDishPrivacy,
   updateDishTags,
+  updateCreatorPhoto,
   acceptTag,
   getPersonalDishes,
   getAllUsers,
@@ -28,10 +30,12 @@ import {
   CommentDoc,
   UserDoc,
 } from "@/lib/firestore";
+import { compressImageToBase64 } from "@/lib/storage";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Heart, ExternalLink, Send, ChevronLeft,
   Trash2, Lock, Globe, X, Pencil, Check, Search,
+  PenLine, RotateCcw, ImageIcon,
 } from "lucide-react";
 import { eloToRating, scoreColor } from "@/lib/eloDisplay";
 import { QUICK_RATING_OPTIONS, QUICK_RATINGS, QuickRating } from "@/lib/elo";
@@ -75,6 +79,16 @@ export default function DishPage() {
   const [showQuickRate, setShowQuickRate] = useState(false);
   const [selectedQuickRate, setSelectedQuickRate] = useState<QuickRating | null>(null);
   const [accepting, setAccepting] = useState(false);
+
+  // Edit dish state (owner only)
+  const [editSheetOpen, setEditSheetOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editRecipeLink, setEditRecipeLink] = useState("");
+  const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
+  const [editPhotoPreview, setEditPhotoPreview] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const editFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
@@ -331,6 +345,67 @@ export default function DishPage() {
     }
   }
 
+  // ── Edit dish ────────────────────────────────────────────────────────────────
+  function handleOpenEdit() {
+    if (!dish) return;
+    // Pre-fill with current values
+    setEditName(dish.name);
+    setEditNotes(dish.notes ?? "");
+    setEditRecipeLink(dish.recipeLink ?? "");
+    // Pre-fill photo with creator's current log
+    const creatorLog = logs.find((l) => l.userId === dish.creatorId);
+    setEditPhotoPreview(creatorLog?.photoURL ?? dish.coverPhotoURL ?? null);
+    setEditPhotoFile(null);
+    setEditSheetOpen(true);
+  }
+
+  function handleEditFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setEditPhotoFile(f);
+    setEditPhotoPreview(URL.createObjectURL(f));
+  }
+
+  async function handleSaveEdit() {
+    if (!user || !dish || !editName.trim()) return;
+    setSavingEdit(true);
+    try {
+      // Update text fields
+      await updateDish(dish.id, user.uid, {
+        name: editName.trim(),
+        notes: editNotes.trim(),
+        recipeLink: editRecipeLink.trim(),
+      });
+      // Update photo if changed
+      if (editPhotoFile) {
+        const photoURL = await compressImageToBase64(editPhotoFile);
+        await updateCreatorPhoto(dish.id, user.uid, photoURL);
+        // Refresh logs from server
+        const updatedLogs = await getDishLogs(dish.id);
+        setLogs(updatedLogs);
+        setDish((d) => d ? { ...d, name: editName.trim(), notes: editNotes.trim(), recipeLink: editRecipeLink.trim(), coverPhotoURL: photoURL } : d);
+      } else {
+        setDish((d) => d ? { ...d, name: editName.trim(), notes: editNotes.trim(), recipeLink: editRecipeLink.trim() } : d);
+      }
+      setEditSheetOpen(false);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save. Please try again.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  // ── Re-rank ──────────────────────────────────────────────────────────────────
+  async function handleRerank() {
+    if (!user || !dish) return;
+    const personal = await getPersonalDishes(user.uid);
+    if (personal.length >= 2) {
+      setRankingDishes(personal);
+      setShowRanking(true);
+    }
+  }
+
   if (loading || fetching) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -349,6 +424,9 @@ export default function DishPage() {
 
   const score = dish.globalScore ?? 1200;
   const isOwner = user?.uid === dish.creatorId;
+  // Can re-rank if they have an ELO entry: owner always does; tagged users do after accepting
+  const isAcceptedTagged = !isTagPending && (dish.taggedUserIds ?? []).includes(user?.uid ?? "");
+  const canRerank = isOwner || isAcceptedTagged;
 
   // Ranking overlay
   if (showRanking) {
@@ -377,6 +455,102 @@ export default function DishPage() {
 
   return (
     <>
+      {/* ── Edit dish sheet ───────────────────────────────────────────────── */}
+      {editSheetOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center backdrop-enter"
+          onClick={() => setEditSheetOpen(false)}
+        >
+          <div
+            className="bg-white rounded-t-3xl w-full max-w-lg overflow-y-auto sheet-enter"
+            style={{ maxHeight: "92vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Handle bar */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-gray-200" />
+            </div>
+
+            <div className="flex items-center justify-between px-5 pt-2 pb-4">
+              <h2 className="font-bold text-lg">Edit dish</h2>
+              <button onClick={() => setEditSheetOpen(false)} className="p-1 -mr-1">
+                <X className="h-5 w-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="px-4 pb-10 space-y-4">
+              {/* Photo */}
+              <div
+                className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100 cursor-pointer group"
+                onClick={() => editFileRef.current?.click()}
+              >
+                {editPhotoPreview ? (
+                  <img src={editPhotoPreview} alt="preview" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-gray-400">
+                    <ImageIcon className="h-10 w-10" />
+                    <span className="text-sm font-medium">Add photo</span>
+                  </div>
+                )}
+                {/* Overlay hint */}
+                <div className="absolute inset-0 bg-black/0 group-active:bg-black/15 transition-colors flex items-center justify-center">
+                  <div className="bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 flex items-center gap-2 opacity-0 group-active:opacity-100 transition-opacity">
+                    <ImageIcon className="h-4 w-4 text-white" />
+                    <span className="text-white text-sm font-medium">Change photo</span>
+                  </div>
+                </div>
+                <div className="absolute bottom-3 right-3 bg-black/50 backdrop-blur-sm rounded-full p-2.5 shadow">
+                  <ImageIcon className="h-4 w-4 text-white" />
+                </div>
+                <input
+                  ref={editFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleEditFile}
+                />
+              </div>
+
+              {/* Dish name */}
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Dish name *"
+                className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-base placeholder-gray-400 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+              />
+
+              {/* Notes */}
+              <textarea
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                placeholder="Notes (optional)"
+                rows={4}
+                className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-base placeholder-gray-400 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 resize-none"
+              />
+
+              {/* Recipe link */}
+              <input
+                type="url"
+                value={editRecipeLink}
+                onChange={(e) => setEditRecipeLink(e.target.value)}
+                placeholder="Recipe link (optional)"
+                className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-base placeholder-gray-400 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+              />
+
+              {/* Save */}
+              <button
+                onClick={handleSaveEdit}
+                disabled={savingEdit || !editName.trim()}
+                className="w-full py-4 bg-orange-500 text-white font-bold rounded-2xl text-base shadow-lg shadow-orange-200/50 disabled:opacity-40 disabled:shadow-none active:scale-[0.98] transition-all"
+              >
+                {savingEdit ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Likers modal */}
       {showLikersModal && (
         <div
@@ -651,6 +825,13 @@ export default function DishPage() {
             {isOwner && (
               <div className="flex items-center gap-2 shrink-0">
                 <button
+                  onClick={handleOpenEdit}
+                  className="p-2 rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 transition-colors"
+                  title="Edit dish"
+                >
+                  <PenLine className="h-4 w-4" />
+                </button>
+                <button
                   onClick={handlePrivacyToggle}
                   className="p-2 rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 transition-colors"
                   title={dish.isPrivate ? "Make public" : "Make private"}
@@ -761,6 +942,15 @@ export default function DishPage() {
                 {likesCount} like{likesCount !== 1 ? "s" : ""}
               </button>
             ) : null}
+            {canRerank && (
+              <button
+                onClick={handleRerank}
+                className="ml-auto flex items-center gap-1.5 text-xs text-gray-400 font-medium active:text-orange-500 transition-colors"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Re-rank
+              </button>
+            )}
           </div>
 
           {dish.isPrivate && (
