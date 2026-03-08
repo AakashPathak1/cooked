@@ -75,9 +75,9 @@ export default function PeoplePage() {
   }
 
   return (
-    <div className="mb-nav page-enter">
+    <div className="flex flex-col h-screen page-enter">
       {/* Header */}
-      <div className="sticky top-0 bg-white/95 backdrop-blur-md z-40 px-4 pt-12 pb-3 border-b border-gray-100">
+      <div className="flex-none bg-white/95 backdrop-blur-md z-40 px-4 pt-12 pb-3 border-b border-gray-100">
         <h1 className="text-xl font-bold mb-3">People</h1>
         <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-3 py-2.5">
           <Search className="h-4 w-4 text-gray-400 shrink-0" />
@@ -91,7 +91,8 @@ export default function PeoplePage() {
         </div>
       </div>
 
-      <div className="px-4 pt-3 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="px-4 pt-3 space-y-2 pb-nav">
         {filtered.map((u, i) => (
           <Link key={u.uid} href={`/profile/${u.handle}`}>
             <div
@@ -126,6 +127,7 @@ export default function PeoplePage() {
             {query && <p className="text-gray-400 text-sm mt-1">Try a different search</p>}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -6,6 +6,7 @@
   .text-balance { text-wrap: balance; }
   .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
   .mb-nav { margin-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+  .pb-nav { padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
 }
 
 @layer base {
