@@ -1,134 +1,101 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Search } from "lucide-react";
 import Link from "next/link";
-import { useAuth } from "@/hooks/useAuth";
-import { getAllUsers, getPersonalDishes, UserDoc } from "@/lib/firestore";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Search, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import useSWR from "swr";
+import { useCooks } from "@/components/tag-picker";
+import { DishTile } from "@/components/dish-views";
+import { PageTitle, Shell } from "@/components/nav";
+import { Avatar } from "@/components/ui/avatar";
+import { Empty } from "@/components/ui/empty";
+import { Input } from "@/components/ui/field";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { SearchResults, UserLite } from "@/lib/types";
 
-interface UserWithStats extends UserDoc {
-  dishCount: number;
-  latestDishAt: number;
+function CookRow({ user }: { user: UserLite }) {
+  return (
+    <li>
+      <Link href={`/profile/${user.handle}`} className="-mx-2 flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-sunk">
+        <Avatar name={user.displayName} src={user.photoURL} size={44} />
+        <span className="min-w-0">
+          <span className="block truncate text-[15px] font-semibold">{user.displayName}</span>
+          <span className="block truncate text-sm text-mute">@{user.handle}</span>
+        </span>
+      </Link>
+    </li>
+  );
 }
 
 export default function PeoplePage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
-  const [users, setUsers] = useState<UserWithStats[]>([]);
-  const [filtered, setFiltered] = useState<UserWithStats[]>([]);
-  const [query, setQuery] = useState("");
-  const [fetching, setFetching] = useState(true);
-
+  const [q, setQ] = useState("");
+  const [debounced, setDebounced] = useState("");
   useEffect(() => {
-    if (!loading && !user) router.replace("/signin");
-  }, [user, loading, router]);
+    const t = setTimeout(() => setDebounced(q.trim()), 220);
+    return () => clearTimeout(t);
+  }, [q]);
 
-  useEffect(() => {
-    if (!user) return;
-    async function load() {
-      const allUsers = await getAllUsers();
-      const withStats = await Promise.all(
-        allUsers.map(async (u) => {
-          const dishes = await getPersonalDishes(u.uid, true);
-          const latestDishAt =
-            dishes.length > 0
-              ? Math.max(...dishes.map((d) => d.createdAt?.toMillis() ?? 0))
-              : 0;
-          return { ...u, dishCount: dishes.length, latestDishAt };
-        })
-      );
-      // Sort by dish count desc, then by most recent dish as tiebreaker
-      withStats.sort((a, b) =>
-        b.dishCount !== a.dishCount
-          ? b.dishCount - a.dishCount
-          : b.latestDishAt - a.latestDishAt
-      );
-      setUsers(withStats);
-      setFiltered(withStats);
-      setFetching(false);
-    }
-    load();
-  }, [user]);
-
-  useEffect(() => {
-    if (!query.trim()) { setFiltered(users); return; }
-    const q = query.toLowerCase();
-    setFiltered(
-      users.filter(
-        (u) =>
-          u.displayName.toLowerCase().includes(q) ||
-          u.handle.toLowerCase().includes(q)
-      )
-    );
-  }, [query, users]);
-
-  if (loading || fetching) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  const { users, loading } = useCooks();
+  const { data: results, isLoading: searching } = useSWR<SearchResults>(
+    debounced ? `/api/search?q=${encodeURIComponent(debounced)}` : null,
+    { keepPreviousData: true, revalidateOnFocus: false }
+  );
 
   return (
-    <div className="flex flex-col h-screen page-enter">
-      {/* Header */}
-      <div className="flex-none bg-white/95 backdrop-blur-md z-40 px-4 pt-12 pb-3 border-b border-gray-100">
-        <h1 className="text-xl font-bold mb-3">People</h1>
-        <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-3 py-2.5">
-          <Search className="h-4 w-4 text-gray-400 shrink-0" />
-          <input
-            type="text"
-            placeholder="Search by name or handle…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400"
-          />
-        </div>
+    <Shell>
+      <PageTitle title="Find cooks" />
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-mute" aria-hidden />
+        <Input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search cooks and dishes"
+          aria-label="Search cooks and dishes"
+          className="pl-10"
+          autoComplete="off"
+        />
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="px-4 pt-3 space-y-2 pb-nav">
-        {filtered.map((u, i) => (
-          <Link key={u.uid} href={`/profile/${u.handle}`}>
-            <div
-              className="flex items-center gap-3 py-3 px-3 rounded-2xl bg-white border border-gray-100 shadow-sm active:scale-[0.98] active:bg-gray-50 transition-all list-enter"
-              style={{ animationDelay: `${i * 40}ms` }}
-            >
-              <Avatar className="h-12 w-12 shrink-0 ring-2 ring-gray-50">
-                <AvatarImage src={u.photoURL} />
-                <AvatarFallback className="bg-orange-100 text-orange-600 font-bold text-base">
-                  {u.displayName?.[0] ?? "?"}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm leading-tight truncate">{u.displayName}</p>
-                <p className="text-xs text-gray-400 mt-0.5">@{u.handle}</p>
+      <div className="mt-6" aria-live="polite">
+        {debounced ? (
+          searching && !results ? (
+            <Skeleton className="h-40" />
+          ) : results && results.users.length + results.dishes.length === 0 ? (
+            <Empty title="No matches" body={`Nothing matches “${debounced}”. Try part of a name.`} />
+          ) : (
+            results && (
+              <div className="space-y-8">
+                {results.users.length > 0 && (
+                  <section>
+                    <h2 className="mb-1 font-display text-xl font-bold">Cooks</h2>
+                    <ul>{results.users.map((u) => <CookRow key={u.uid} user={u} />)}</ul>
+                  </section>
+                )}
+                {results.dishes.length > 0 && (
+                  <section>
+                    <h2 className="mb-3 font-display text-xl font-bold">Dishes</h2>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3">
+                      {results.dishes.map((d) => <DishTile key={d.id} dish={d} />)}
+                    </div>
+                  </section>
+                )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="text-right">
-                  <p className="font-bold text-sm leading-tight">{u.dishCount}</p>
-                  <p className="text-[10px] text-gray-400 leading-tight">dish{u.dishCount !== 1 ? "es" : ""}</p>
-                </div>
-                <ChevronRight className="h-4 w-4 text-gray-300" />
-              </div>
-            </div>
-          </Link>
-        ))}
-
-        {filtered.length === 0 && (
-          <div className="text-center py-20 fade-in">
-            <p className="text-5xl mb-3 float">👤</p>
-            <p className="text-gray-500 font-medium">No users found</p>
-            {query && <p className="text-gray-400 text-sm mt-1">Try a different search</p>}
+            )
+          )
+        ) : loading ? (
+          <div className="space-y-2">
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}
           </div>
+        ) : users.length === 0 ? (
+          <Empty title="You're the first one here" body="Invite friends to sign in with Google and they'll show up here." />
+        ) : (
+          <section>
+            <h2 className="mb-1 font-display text-xl font-bold">Everyone</h2>
+            <ul>{users.map((u) => <CookRow key={u.uid} user={u} />)}</ul>
+          </section>
         )}
       </div>
-      </div>
-    </div>
+    </Shell>
   );
 }

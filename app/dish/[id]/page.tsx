@@ -1,1227 +1,188 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useEffect, useState, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { ArrowLeft, ExternalLink, Link2, Lock, Share2 } from "lucide-react";
 import Link from "next/link";
-import { useAuth } from "@/hooks/useAuth";
-import {
-  getDish,
-  getDishLogs,
-  createDishLog,
-  deleteDishLog,
-  deleteDish,
-  updateDish,
-  updateDishPrivacy,
-  updateDishTags,
-  setCoverPhoto,
-  updateCreatorPhoto,
-  resetPersonalElo,
-  acceptTag,
-  getPersonalDishes,
-  getAllUsers,
-  getComments,
-  addComment,
-  deleteComment,
-  toggleLike,
-  isLiked,
-  getLikers,
-  getUserByUid,
-  createNotification,
-  DishDoc,
-  DishLogDoc,
-  CommentDoc,
-  UserDoc,
-} from "@/lib/firestore";
-import { compressImageToBase64 } from "@/lib/storage";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Heart, ExternalLink, Send, ChevronLeft,
-  Trash2, Lock, Globe, X, Pencil, Check, Search,
-  PenLine, RotateCcw, ImageIcon, Plus, Star,
-} from "lucide-react";
-import { eloToRating, scoreColor } from "@/lib/eloDisplay";
-import { QUICK_RATING_OPTIONS, QUICK_RATINGS, QuickRating } from "@/lib/elo";
-import { PairwiseComparison } from "@/components/PairwiseComparison";
+import { useParams, useRouter } from "next/navigation";
+import useSWR from "swr";
+import { LikeButton, SaveButton } from "@/components/dish-actions";
+import { Comments } from "@/components/dish/comments";
+import { Gallery } from "@/components/dish/gallery";
+import { OwnerTools } from "@/components/dish/owner-tools";
+import { ParticipationPanel } from "@/components/dish/participation";
+import { Shell } from "@/components/nav";
+import { Avatar } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Empty, ErrorState } from "@/components/ui/empty";
+import { ScoreStamp } from "@/components/ui/score-stamp";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
+import { useMe } from "@/hooks/useMe";
+import { ApiError } from "@/lib/client/api";
+import { hostnameOf, plural, safeHttpUrl, timeAgo } from "@/lib/format";
+import type { DishDetail } from "@/lib/types";
 
 export default function DishPage() {
   const { id } = useParams<{ id: string }>();
-  const { user, loading } = useAuth();
   const router = useRouter();
+  const toast = useToast();
+  const { me } = useMe();
+  const { data: dish, error, mutate, isLoading } = useSWR<DishDetail>(`/api/dishes/${id}`, { revalidateOnFocus: false });
 
-  const [dish, setDish] = useState<DishDoc | null>(null);
-  const [creator, setCreator] = useState<UserDoc | null>(null);
-  const [taggedUsers, setTaggedUsers] = useState<UserDoc[]>([]);
-  const [logs, setLogs] = useState<DishLogDoc[]>([]);
-  const [logUsers, setLogUsers] = useState<Record<string, UserDoc>>({});
-  const [comments, setComments] = useState<CommentDoc[]>([]);
-  const [commentUsers, setCommentUsers] = useState<Record<string, UserDoc>>({});
-  const [liked, setLiked] = useState(false);
-  const [likesCount, setLikesCount] = useState(0);
-  const [likers, setLikers] = useState<UserDoc[]>([]);
-  const [showLikersModal, setShowLikersModal] = useState(false);
-  const [commentText, setCommentText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [fetching, setFetching] = useState(true);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [rankingDishes, setRankingDishes] = useState<DishDoc[]>([]);
-  const [showRanking, setShowRanking] = useState(false);
-  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
-  const photoScrollRef = useRef<HTMLDivElement>(null);
-  const commentsRef = useRef<HTMLDivElement>(null);
-
-  // Tag editor state
-  const [editingTags, setEditingTags] = useState(false);
-  const [allUsers, setAllUsers] = useState<UserDoc[]>([]);
-  const [pendingTagIds, setPendingTagIds] = useState<string[]>([]);
-  const [savingTags, setSavingTags] = useState(false);
-  const [tagSearch, setTagSearch] = useState("");
-
-  // Accept tag state
-  const [isTagPending, setIsTagPending] = useState(false);
-  const [showQuickRate, setShowQuickRate] = useState(false);
-  const [selectedQuickRate, setSelectedQuickRate] = useState<QuickRating | null>(null);
-  const [accepting, setAccepting] = useState(false);
-
-  // Re-rank quick-rate state
-  const [showRerankQuickRate, setShowRerankQuickRate] = useState(false);
-  const [selectedRerankRate, setSelectedRerankRate] = useState<QuickRating | null>(null);
-  const [rerankLoading, setRerankLoading] = useState(false);
-
-  // Add photo / cover photo state (owner only)
-  const addPhotoRef = useRef<HTMLInputElement>(null);
-  const [addingPhoto, setAddingPhoto] = useState(false);
-  const [settingCover, setSettingCover] = useState(false);
-
-  // Edit dish state (owner only)
-  const [editSheetOpen, setEditSheetOpen] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editNotes, setEditNotes] = useState("");
-  const [editRecipeLink, setEditRecipeLink] = useState("");
-  const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
-  const [editPhotoPreview, setEditPhotoPreview] = useState<string | null>(null);
-  const [savingEdit, setSavingEdit] = useState(false);
-  const editFileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!loading && !user) router.replace("/signin");
-  }, [user, loading, router]);
-
-  useEffect(() => {
-    if (!id || !user) return;
-    async function load() {
-      if (!user) return;
-      const d = await getDish(id as string);
-      if (!d) { setFetching(false); return; }
-      setDish(d);
-      setLikesCount(d.likesCount ?? 0);
-
-      const [creatorData, likedData, commentsData, logsData] = await Promise.all([
-        getUserByUid(d.creatorId),
-        isLiked(user.uid, d.id),
-        getComments(d.id),
-        getDishLogs(d.id),
-      ]);
-
-      setCreator(creatorData);
-      setLiked(likedData);
-      setComments(commentsData);
-      setLogs(logsData);
-
-      // Fetch tagged users
-      const tagged = await Promise.all(d.taggedUserIds.map((uid: string) => getUserByUid(uid)));
-      const resolvedTagged = tagged.filter(Boolean) as UserDoc[];
-      setTaggedUsers(resolvedTagged);
-
-      // Check if current user is tagged but hasn't accepted yet
-      if (d.taggedUserIds.includes(user.uid) && d.creatorId !== user.uid) {
-        const { getDoc, doc } = await import("firebase/firestore");
-        const { db } = await import("@/lib/firebase");
-        const udSnap = await getDoc(doc(db, "userDishes", `${user.uid}_${d.id}`));
-        setIsTagPending(!udSnap.exists());
-      }
-
-      // Fetch log users
-      const allUids = Array.from(new Set([
-        ...commentsData.map((c) => c.userId),
-        ...logsData.map((l) => l.userId),
-      ]));
-      const userMap: Record<string, UserDoc> = {};
-      await Promise.all(allUids.map(async (uid) => {
-        const u = await getUserByUid(uid);
-        if (u) userMap[uid] = u;
-      }));
-      setCommentUsers(userMap);
-      setLogUsers(userMap);
-      setFetching(false);
-    }
-    load();
-  }, [id, user]);
-
-  async function handleLike() {
-    if (!user || !dish) return;
-    const nowLiked = await toggleLike(user.uid, dish.id);
-    setLiked(nowLiked);
-    setLikesCount((c) => (nowLiked ? c + 1 : c - 1));
-    if (nowLiked && dish.creatorId !== user.uid) {
-      const fromUser = await getUserByUid(user.uid);
-      await createNotification({
-        toUid: dish.creatorId,
-        fromUid: user.uid,
-        fromDisplayName: fromUser?.displayName ?? "Someone",
-        fromPhotoURL: fromUser?.photoURL ?? "",
-        type: "like",
-        dishId: dish.id,
-        dishName: dish.name,
-      });
-      fetch("/api/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toUid: dish.creatorId,
-          title: "🍳 Cooked",
-          body: `${fromUser?.displayName ?? "Someone"} liked "${dish.name}"`,
-          url: `/dish/${dish.id}`,
-        }),
-      }).catch(() => {});
-    }
-  }
-
-  async function handleOpenLikers() {
+  async function share() {
     if (!dish) return;
-    const { users, total } = await getLikers(dish.id);
-    setLikers(users);
-    setLikesCount(total);
-    setShowLikersModal(true);
-  }
-
-  async function handleComment(e: React.FormEvent) {
-    e.preventDefault();
-    if (!user || !dish || !commentText.trim()) return;
-    setSubmitting(true);
-    const text = commentText.trim();
-    await addComment(dish.id, user.uid, text);
-    setCommentText("");
-    const updated = await getComments(dish.id);
-    setComments(updated);
-    setSubmitting(false);
-    setTimeout(() => commentsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-    if (dish.creatorId !== user.uid) {
-      const fromUser = await getUserByUid(user.uid);
-      await createNotification({
-        toUid: dish.creatorId,
-        fromUid: user.uid,
-        fromDisplayName: fromUser?.displayName ?? "Someone",
-        fromPhotoURL: fromUser?.photoURL ?? "",
-        type: "comment",
-        dishId: dish.id,
-        dishName: dish.name,
-      });
-      fetch("/api/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toUid: dish.creatorId,
-          title: "🍳 Cooked",
-          body: `${fromUser?.displayName ?? "Someone"} commented on "${dish.name}"`,
-          url: `/dish/${dish.id}`,
-        }),
-      }).catch(() => {});
-    }
-    // Ensure new commenter is in commentUsers
-    const u = await getUserByUid(user.uid);
-    if (u) setCommentUsers((m) => ({ ...m, [user.uid]: u }));
-  }
-
-  async function handleDeleteComment(commentId: string) {
-    if (!user) return;
+    const url = window.location.href;
     try {
-      await deleteComment(commentId, user.uid);
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  async function handleSetCover(photoURL: string) {
-    if (!user || !dish) return;
-    setSettingCover(true);
-    try {
-      await setCoverPhoto(dish.id, user.uid, photoURL);
-      setDish((d) => d ? { ...d, coverPhotoURL: photoURL } : d);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSettingCover(false);
-    }
-  }
-
-  async function handleDeleteLog(logId: string) {
-    if (!user || !dish) return;
-    if (!confirm("Remove this photo?")) return;
-    try {
-      await deleteDishLog(logId, dish.id, user.uid);
-      const updatedLogs = await getDishLogs(dish.id);
-      const newCover = updatedLogs[updatedLogs.length - 1]?.photoURL ?? "";
-      const newIndex = Math.min(currentPhotoIndex, Math.max(0, updatedLogs.length - 1));
-      setLogs(updatedLogs);
-      setDish((d) => d ? { ...d, coverPhotoURL: newCover } : d);
-      setCurrentPhotoIndex(newIndex);
-      setTimeout(() => {
-        if (photoScrollRef.current) {
-          photoScrollRef.current.scrollTo({ left: newIndex * photoScrollRef.current.offsetWidth });
-        }
-      }, 0);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to remove photo.");
-    }
-  }
-
-  async function handleAddPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f || !user || !dish) return;
-    setAddingPhoto(true);
-    try {
-      const photoURL = await compressImageToBase64(f);
-      await createDishLog(dish.id, user.uid, photoURL);
-      const updatedLogs = await getDishLogs(dish.id);
-      setLogs(updatedLogs);
-      setDish((d) => d ? { ...d, coverPhotoURL: photoURL } : d);
-      const newIndex = updatedLogs.length - 1;
-      setCurrentPhotoIndex(newIndex);
-      setTimeout(() => {
-        if (photoScrollRef.current) {
-          photoScrollRef.current.scrollTo({
-            left: newIndex * photoScrollRef.current.offsetWidth,
-            behavior: "smooth",
-          });
-        }
-      }, 100);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to add photo.");
-    } finally {
-      setAddingPhoto(false);
-      if (addPhotoRef.current) addPhotoRef.current.value = "";
-    }
-  }
-
-  async function handleDelete() {
-    if (!user || !dish) return;
-    if (!confirm("Delete this dish? This cannot be undone.")) return;
-    setDeleteLoading(true);
-    try {
-      await deleteDish(dish.id, user.uid);
-      router.replace("/");
-    } catch (err) {
-      console.error(err);
-      alert("Failed to delete. Please try again.");
-      setDeleteLoading(false);
-    }
-  }
-
-  async function handlePrivacyToggle() {
-    if (!user || !dish) return;
-    const next = !dish.isPrivate;
-    await updateDishPrivacy(dish.id, user.uid, next);
-    setDish((d) => d ? { ...d, isPrivate: next } : d);
-  }
-
-  // ── Accept tag ──────────────────────────────────────────────────────────────
-  async function handleAcceptTag() {
-    if (!user || !dish || !selectedQuickRate) return;
-    setAccepting(true);
-    setShowQuickRate(false);
-    try {
-      const initialElo = QUICK_RATINGS[selectedQuickRate];
-      await acceptTag(user.uid, dish.id, initialElo);
-      setIsTagPending(false);
-      // Notify dish owner
-      const fromUser = await getUserByUid(user.uid);
-      await createNotification({
-        toUid: dish.creatorId,
-        fromUid: user.uid,
-        fromDisplayName: fromUser?.displayName ?? "Someone",
-        fromPhotoURL: fromUser?.photoURL ?? "",
-        type: "accepted",
-        dishId: dish.id,
-        dishName: dish.name,
-      });
-      fetch("/api/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toUid: dish.creatorId,
-          title: "🍳 Cooked",
-          body: `${fromUser?.displayName ?? "Someone"} accepted your tag on "${dish.name}"`,
-          url: `/dish/${dish.id}`,
-        }),
-      }).catch(() => {});
-      // Trigger pairwise ranking if they have ≥2 personal dishes
-      const personal = await getPersonalDishes(user.uid);
-      if (personal.length >= 2) {
-        setRankingDishes(personal);
-        setShowRanking(true);
+      if (navigator.share) await navigator.share({ title: dish.name, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        toast({ message: "Link copied" });
       }
-    } finally {
-      setAccepting(false);
-      setSelectedQuickRate(null);
+    } catch {
+      /* dismissed */
     }
   }
 
-  // ── Tag editor ──────────────────────────────────────────────────────────────
-  async function handleOpenTagEditor() {
-    if (!dish) return;
-    const users = await getAllUsers();
-    setAllUsers(users.filter((u) => u.uid !== dish.creatorId));
-    setPendingTagIds(dish.taggedUserIds ?? []);
-    setTagSearch("");
-    setEditingTags(true);
-  }
+  const back = (
+    <button
+      onClick={() => (window.history.length > 1 ? router.back() : router.push("/"))}
+      className="-ml-2 mb-3 inline-flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-mute hover:bg-sunk hover:text-ink"
+    >
+      <ArrowLeft className="h-4 w-4" aria-hidden /> Back
+    </button>
+  );
 
-  async function handleSaveTags() {
-    if (!user || !dish) return;
-    setSavingTags(true);
-    try {
-      const addedUids = await updateDishTags(dish.id, user.uid, pendingTagIds);
-      // Notify newly tagged users
-      await Promise.all(addedUids.map(async (uid) => {
-        await createNotification({
-          toUid: uid,
-          fromUid: user.uid,
-          fromDisplayName: user.displayName ?? "Someone",
-          fromPhotoURL: user.photoURL ?? "",
-          type: "tag",
-          dishId: dish.id,
-          dishName: dish.name,
-        });
-        fetch("/api/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            toUid: uid,
-            title: "🍳 Cooked",
-            body: `${user.displayName ?? "Someone"} tagged you in "${dish.name}"`,
-            url: `/dish/${dish.id}`,
-          }),
-        }).catch(() => {});
-      }));
-      // Update local state
-      setDish((d) => d ? { ...d, taggedUserIds: pendingTagIds } : d);
-      const resolved = await Promise.all(pendingTagIds.map((uid) => getUserByUid(uid)));
-      setTaggedUsers(resolved.filter(Boolean) as UserDoc[]);
-      setEditingTags(false);
-    } finally {
-      setSavingTags(false);
-    }
-  }
-
-  // ── Edit dish ────────────────────────────────────────────────────────────────
-  function handleOpenEdit() {
-    if (!dish) return;
-    // Pre-fill with current values
-    setEditName(dish.name);
-    setEditNotes(dish.notes ?? "");
-    setEditRecipeLink(dish.recipeLink ?? "");
-    // Pre-fill photo with creator's current log
-    const creatorLog = logs.find((l) => l.userId === dish.creatorId);
-    setEditPhotoPreview(creatorLog?.photoURL ?? dish.coverPhotoURL ?? null);
-    setEditPhotoFile(null);
-    setEditSheetOpen(true);
-  }
-
-  function handleEditFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setEditPhotoFile(f);
-    setEditPhotoPreview(URL.createObjectURL(f));
-  }
-
-  async function handleSaveEdit() {
-    if (!user || !dish || !editName.trim()) return;
-    setSavingEdit(true);
-    try {
-      // Update text fields
-      await updateDish(dish.id, user.uid, {
-        name: editName.trim(),
-        notes: editNotes.trim(),
-        recipeLink: editRecipeLink.trim(),
-      });
-      // Update photo if changed
-      if (editPhotoFile) {
-        const photoURL = await compressImageToBase64(editPhotoFile);
-        await updateCreatorPhoto(dish.id, user.uid, photoURL);
-        // Refresh logs from server
-        const updatedLogs = await getDishLogs(dish.id);
-        setLogs(updatedLogs);
-        setDish((d) => d ? { ...d, name: editName.trim(), notes: editNotes.trim(), recipeLink: editRecipeLink.trim(), coverPhotoURL: photoURL } : d);
-      } else {
-        setDish((d) => d ? { ...d, name: editName.trim(), notes: editNotes.trim(), recipeLink: editRecipeLink.trim() } : d);
-      }
-      setEditSheetOpen(false);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to save. Please try again.");
-    } finally {
-      setSavingEdit(false);
-    }
-  }
-
-  // ── Re-rank ──────────────────────────────────────────────────────────────────
-  function handleRerank() {
-    setSelectedRerankRate(null);
-    setShowRerankQuickRate(true);
-  }
-
-  async function handleConfirmRerank() {
-    if (!user || !dish || !selectedRerankRate) return;
-    setRerankLoading(true);
-    setShowRerankQuickRate(false);
-    try {
-      await resetPersonalElo(user.uid, dish.id, QUICK_RATINGS[selectedRerankRate]);
-      const personal = await getPersonalDishes(user.uid);
-      if (personal.length >= 2) {
-        setRankingDishes(personal);
-        setShowRanking(true);
-      }
-    } finally {
-      setRerankLoading(false);
-      setSelectedRerankRate(null);
-    }
-  }
-
-  if (loading || fetching) {
+  if (error instanceof ApiError && error.status === 404) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <Shell>
+        <Empty
+          title="This dish isn't available"
+          body="It may have been deleted, or it's private to someone else."
+          action={
+            <Button asChild>
+              <Link href="/">Back to the feed</Link>
+            </Button>
+          }
+        />
+      </Shell>
+    );
+  }
+  if (error) {
+    return (
+      <Shell>
+        <ErrorState message={error.message} onRetry={() => mutate()} />
+      </Shell>
+    );
+  }
+  if (isLoading || !dish) {
+    return (
+      <Shell>
+        {back}
+        <Skeleton className="aspect-[4/5] w-full rounded-2xl" />
+        <Skeleton className="mt-5 h-8 w-2/3" />
+        <Skeleton className="mt-3 h-20 w-full" />
+      </Shell>
     );
   }
 
-  if (!dish) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <p className="text-gray-400">Dish not found.</p>
-      </div>
-    );
-  }
-
-  const score = dish.globalScore ?? 1200;
-  const isOwner = user?.uid === dish.creatorId;
-  // Can re-rank if they have an ELO entry: owner always does; tagged users do after accepting
-  const isAcceptedTagged = !isTagPending && (dish.taggedUserIds ?? []).includes(user?.uid ?? "");
-  const canRerank = isOwner || isAcceptedTagged;
-
-  // Ranking overlay
-  if (showRanking) {
-    return (
-      <div className="min-h-screen bg-white">
-        <div className="sticky top-0 bg-white/90 backdrop-blur-sm z-40 px-4 pt-12 pb-3 border-b border-gray-100 flex items-center gap-3">
-          <button onClick={() => setShowRanking(false)} className="p-1">
-            <X className="h-5 w-5 text-gray-500" />
-          </button>
-          <div>
-            <h1 className="text-lg font-bold">How does it rank?</h1>
-            <p className="text-xs text-gray-400">Compare against your other dishes</p>
-          </div>
-        </div>
-        <div className="px-4 pt-4 pb-8">
-          <PairwiseComparison
-            dishes={rankingDishes}
-            highlightDishId={dish.id}
-            onComplete={() => setShowRanking(false)}
-            completeLabel="Done"
-          />
-        </div>
-      </div>
-    );
-  }
+  const recipe = safeHttpUrl(dish.recipeLink);
+  const v = dish.viewer;
+  const others = dish.participants.filter((p) => p.role !== "creator");
 
   return (
-    <>
-      {/* ── Edit dish sheet ───────────────────────────────────────────────── */}
-      {editSheetOpen && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center backdrop-enter"
-          onClick={() => setEditSheetOpen(false)}
-        >
-          <div
-            className="bg-white rounded-t-3xl w-full max-w-lg overflow-y-auto sheet-enter"
-            style={{ maxHeight: "92vh" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Handle bar */}
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-gray-200" />
-            </div>
+    <Shell>
+      {back}
+      <Gallery dishId={dish.id} photos={dish.photos} viewerUid={me?.uid} isOwner={v.isOwner} onChanged={() => mutate()} />
 
-            <div className="flex items-center justify-between px-5 pt-2 pb-4">
-              <h2 className="font-bold text-lg">Edit dish</h2>
-              <button onClick={() => setEditSheetOpen(false)} className="p-1 -mr-1">
-                <X className="h-5 w-5 text-gray-400" />
-              </button>
-            </div>
-
-            <div className="px-4 pb-10 space-y-4">
-              {/* Photo */}
-              <div
-                className="relative aspect-square rounded-2xl overflow-hidden bg-gray-100 cursor-pointer group"
-                onClick={() => editFileRef.current?.click()}
-              >
-                {editPhotoPreview ? (
-                  <img src={editPhotoPreview} alt="preview" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-gray-400">
-                    <ImageIcon className="h-10 w-10" />
-                    <span className="text-sm font-medium">Add photo</span>
-                  </div>
-                )}
-                {/* Overlay hint */}
-                <div className="absolute inset-0 bg-black/0 group-active:bg-black/15 transition-colors flex items-center justify-center">
-                  <div className="bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 flex items-center gap-2 opacity-0 group-active:opacity-100 transition-opacity">
-                    <ImageIcon className="h-4 w-4 text-white" />
-                    <span className="text-white text-sm font-medium">Change photo</span>
-                  </div>
-                </div>
-                <div className="absolute bottom-3 right-3 bg-black/50 backdrop-blur-sm rounded-full p-2.5 shadow">
-                  <ImageIcon className="h-4 w-4 text-white" />
-                </div>
-                <input
-                  ref={editFileRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleEditFile}
-                />
-              </div>
-
-              {/* Dish name */}
-              <input
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder="Dish name *"
-                className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-base placeholder-gray-400 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-              />
-
-              {/* Notes */}
-              <textarea
-                value={editNotes}
-                onChange={(e) => setEditNotes(e.target.value)}
-                placeholder="Notes (optional)"
-                rows={4}
-                className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-base placeholder-gray-400 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 resize-none"
-              />
-
-              {/* Recipe link */}
-              <input
-                type="url"
-                value={editRecipeLink}
-                onChange={(e) => setEditRecipeLink(e.target.value)}
-                placeholder="Recipe link (optional)"
-                className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-base placeholder-gray-400 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-              />
-
-              {/* Save */}
-              <button
-                onClick={handleSaveEdit}
-                disabled={savingEdit || !editName.trim()}
-                className="w-full py-4 bg-orange-500 text-white font-bold rounded-2xl text-base shadow-lg shadow-orange-200/50 disabled:opacity-40 disabled:shadow-none active:scale-[0.98] transition-all"
-              >
-                {savingEdit ? "Saving…" : "Save changes"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Re-rank quick-rate sheet */}
-      {showRerankQuickRate && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center backdrop-enter"
-          onClick={() => setShowRerankQuickRate(false)}
-        >
-          <div
-            className="bg-white rounded-t-3xl w-full max-w-sm pb-10 sheet-enter"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-gray-200" />
-            </div>
-            <div className="flex items-center justify-between px-5 pt-2 pb-1">
-              <div>
-                <h2 className="font-bold text-base">How would you rate it now?</h2>
-                <p className="text-xs text-gray-400 mt-0.5">This resets your score anchor before re-ranking</p>
-              </div>
-              <button onClick={() => setShowRerankQuickRate(false)} className="p-1 -mr-1">
-                <X className="h-5 w-5 text-gray-400" />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 p-4">
-              {QUICK_RATING_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  onClick={() => setSelectedRerankRate(opt.key)}
-                  className={`flex items-center gap-2.5 px-4 py-3.5 rounded-2xl border-2 transition-all text-left ${
-                    selectedRerankRate === opt.key
-                      ? "border-orange-500 bg-orange-50 text-orange-700"
-                      : "border-gray-200 bg-white text-gray-600 active:bg-gray-50"
-                  }`}
-                >
-                  <span className="text-2xl">{opt.emoji}</span>
-                  <span className="text-sm font-medium leading-tight">{opt.label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="px-4">
-              <button
-                onClick={handleConfirmRerank}
-                disabled={!selectedRerankRate || rerankLoading}
-                className="w-full py-3.5 bg-orange-500 text-white font-semibold rounded-2xl text-sm shadow-lg shadow-orange-200/50 disabled:opacity-40 disabled:shadow-none active:scale-[0.98] transition-all"
-              >
-                {rerankLoading ? "Loading…" : "Start ranking"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Likers modal */}
-      {showLikersModal && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 backdrop-enter"
-          onClick={() => setShowLikersModal(false)}
-        >
-          <div
-            className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl modal-enter"
-            style={{ maxHeight: "70vh" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100 shrink-0">
-              <h2 className="font-bold text-base">
-                {likesCount} like{likesCount !== 1 ? "s" : ""}
-              </h2>
-              <button onClick={() => setShowLikersModal(false)} className="p-1 -mr-1">
-                <X className="h-5 w-5 text-gray-400" />
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1 min-h-0">
-              {likers.length === 0 ? (
-                <p className="text-center text-gray-400 py-10 text-sm">No likes yet</p>
-              ) : (
-                <div className="divide-y divide-gray-50">
-                  {likers.map((u) => (
-                    <Link key={u.uid} href={`/profile/${u.handle}`} onClick={() => setShowLikersModal(false)}>
-                      <div className="flex items-center gap-3 px-5 py-3.5 active:bg-gray-50 transition-colors">
-                        <Avatar className="h-10 w-10 shrink-0">
-                          <AvatarImage src={u.photoURL} />
-                          <AvatarFallback className="bg-orange-100 text-orange-600 font-semibold">{u.displayName?.[0]}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-semibold text-sm leading-tight">{u.displayName}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">@{u.handle}</p>
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Quick rate modal — shown when tagged user taps Accept */}
-      {showQuickRate && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center backdrop-enter"
-          onClick={() => setShowQuickRate(false)}
-        >
-          <div
-            className="bg-white rounded-t-3xl w-full max-w-sm pb-10 sheet-enter"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 pt-5 pb-1">
-              <div>
-                <h2 className="font-bold text-base">How was this dish?</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Your rating anchors your starting score</p>
-              </div>
-              <button onClick={() => setShowQuickRate(false)} className="p-1 -mr-1">
-                <X className="h-5 w-5 text-gray-400" />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 p-4">
-              {QUICK_RATING_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  onClick={() => setSelectedQuickRate(opt.key)}
-                  className={`flex items-center gap-2.5 px-4 py-3 rounded-2xl border-2 transition-all text-left ${
-                    selectedQuickRate === opt.key
-                      ? "border-orange-500 bg-orange-50 text-orange-700"
-                      : "border-gray-200 bg-white text-gray-600"
-                  }`}
-                >
-                  <span className="text-2xl">{opt.emoji}</span>
-                  <span className="text-sm font-medium leading-tight">{opt.label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="px-4">
-              <button
-                onClick={handleAcceptTag}
-                disabled={!selectedQuickRate || accepting}
-                className="w-full py-3.5 bg-orange-500 text-white font-semibold rounded-2xl text-sm disabled:opacity-40 active:scale-95 transition-all"
-              >
-                {accepting ? "Adding to profile…" : "Accept & add to profile"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tag editor modal */}
-      {editingTags && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6 backdrop-enter"
-          onClick={() => { setEditingTags(false); setTagSearch(""); }}
-        >
-          <div
-            className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-xl modal-enter"
-            style={{ maxHeight: "75vh" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
-              <div>
-                <h2 className="font-bold text-base">Tag people</h2>
-                {pendingTagIds.length > 0 && (
-                  <p className="text-xs text-orange-500 mt-0.5">{pendingTagIds.length} selected</p>
-                )}
-              </div>
-              <button onClick={() => { setEditingTags(false); setTagSearch(""); }} className="p-1 -mr-1">
-                <X className="h-5 w-5 text-gray-400" />
-              </button>
-            </div>
-
-            {/* Search */}
-            <div className="px-4 pb-3 shrink-0">
-              <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5">
-                <Search className="h-4 w-4 text-gray-400 shrink-0" />
-                <input
-                  type="text"
-                  placeholder="Search people…"
-                  value={tagSearch}
-                  onChange={(e) => setTagSearch(e.target.value)}
-                  autoFocus
-                  className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400"
-                />
-                {tagSearch && (
-                  <button onClick={() => setTagSearch("")} className="text-gray-400">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* User list */}
-            <div className="overflow-y-auto flex-1 min-h-0 border-t border-gray-100">
-              {allUsers
-                .filter((u) => {
-                  const q = tagSearch.toLowerCase();
-                  return !q
-                    || (u.displayName || "").toLowerCase().includes(q)
-                    || u.handle.toLowerCase().includes(q);
-                })
-                .map((u) => {
-                  const selected = pendingTagIds.includes(u.uid);
-                  return (
-                    <button
-                      key={u.uid}
-                      onClick={() => setPendingTagIds((prev) =>
-                        selected ? prev.filter((id) => id !== u.uid) : [...prev, u.uid]
-                      )}
-                      className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${
-                        selected ? "bg-orange-50" : "active:bg-gray-50"
-                      }`}
-                    >
-                      <Avatar className="h-9 w-9 shrink-0">
-                        <AvatarImage src={u.photoURL} />
-                        <AvatarFallback className="bg-orange-100 text-orange-600 text-sm font-semibold">
-                          {(u.displayName || u.handle)[0]}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0 text-left">
-                        <p className="font-semibold text-sm leading-tight truncate">
-                          {u.displayName || u.handle}
-                        </p>
-                        <p className="text-xs text-gray-400 truncate">@{u.handle}</p>
-                      </div>
-                      <div className={`h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                        selected ? "bg-orange-500 border-orange-500" : "border-gray-300"
-                      }`}>
-                        {selected && <Check className="h-3 w-3 text-white" />}
-                      </div>
-                    </button>
-                  );
-                })}
-            </div>
-
-            {/* Save */}
-            <div className="p-4 border-t border-gray-100 shrink-0">
-              <button
-                onClick={handleSaveTags}
-                disabled={savingTags}
-                className="w-full py-3 bg-orange-500 text-white font-semibold rounded-2xl text-sm disabled:opacity-50"
-              >
-                {savingTags ? "Saving…" : "Save tags"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="mb-nav">
-        {/* Photo carousel */}
-        <div className="relative">
-          {logs.length > 0 ? (
-            <div
-              ref={photoScrollRef}
-              className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
-              onScroll={(e) => {
-                const el = e.currentTarget;
-                setCurrentPhotoIndex(Math.round(el.scrollLeft / el.offsetWidth));
-              }}
+      <div className="mt-6 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="font-display text-[32px] font-extrabold leading-[1.05] tracking-tightest">{dish.name}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-mute">
+            <Link
+              href={dish.creator.handle ? `/profile/${dish.creator.handle}` : "#"}
+              className="inline-flex items-center gap-1.5 font-medium text-ink hover:underline"
             >
-              {logs.map((log) => {
-                const uploader = logUsers[log.userId];
-                return (
-                  <div key={log.id} className="relative shrink-0 w-full aspect-square bg-gray-100 snap-start overflow-hidden">
-                    <img src={log.photoURL} alt={dish.name} className="w-full h-full object-cover" />
-
-                    {/* Bottom gradient scrim */}
-                    <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
-
-                    {/* Uploader pill */}
-                    {uploader && (
-                      <div className="absolute bottom-3.5 left-3.5 flex items-center gap-2 bg-black/35 backdrop-blur-sm rounded-full pl-1 pr-3 py-1">
-                        <Avatar className="h-6 w-6 ring-1 ring-white/30">
-                          <AvatarImage src={uploader.photoURL} />
-                          <AvatarFallback className="text-[9px] bg-gray-600 text-white">{uploader.displayName?.[0]}</AvatarFallback>
-                        </Avatar>
-                        <span className="text-white text-xs font-semibold leading-none">{uploader.displayName}</span>
-                      </div>
-                    )}
-
-                    {/* Cover photo badge / Set as cover button — owner, multi-photo */}
-                    {isOwner && logs.length > 1 && (
-                      log.photoURL === dish.coverPhotoURL ? (
-                        <div className="absolute top-[104px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/35 backdrop-blur-sm rounded-full px-3 py-1.5">
-                          <Star className="h-3 w-3 text-yellow-300 fill-yellow-300" />
-                          <span className="text-white text-xs font-semibold">Cover photo</span>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleSetCover(log.photoURL); }}
-                          disabled={settingCover}
-                          className="absolute top-[104px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full px-3 py-1.5 active:bg-black/60 transition-colors disabled:opacity-50"
-                        >
-                          <Star className="h-3 w-3 text-white/80" />
-                          <span className="text-white text-xs font-semibold">
-                            {settingCover ? "Setting…" : "Set as cover"}
-                          </span>
-                        </button>
-                      )
-                    )}
-
-                    {/* Delete button — dish owner only, when more than 1 photo */}
-                    {isOwner && logs.length > 1 && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteLog(log.id!); }}
-                        className="absolute bottom-3 right-3 bg-black/40 backdrop-blur-sm rounded-full p-2.5 active:bg-red-500/70 transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4 text-white" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="aspect-square bg-gray-100 flex items-center justify-center text-7xl">🍽️</div>
-          )}
-
-          {/* Back button */}
-          <button
-            onClick={() => router.back()}
-            className="absolute top-12 left-4 bg-black/40 backdrop-blur-sm rounded-full p-2"
-          >
-            <ChevronLeft className="h-5 w-5 text-white" />
-          </button>
-
-          {/* Score badge */}
-          <div
-            className="absolute top-12 right-4 rounded-full h-12 w-12 flex items-center justify-center shadow-lg"
-            style={{ backgroundColor: scoreColor(score) }}
-          >
-            <span className="text-white text-sm font-bold">{eloToRating(score)}</span>
-          </div>
-
-          {/* Pagination dots — above the bottom pills */}
-          {logs.length > 1 && (
-            <div className="absolute bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
-              {logs.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    photoScrollRef.current?.scrollTo({ left: i * photoScrollRef.current!.offsetWidth, behavior: "smooth" });
-                    setCurrentPhotoIndex(i);
-                  }}
-                  className={`rounded-full transition-all duration-300 ${
-                    i === currentPhotoIndex
-                      ? "w-5 h-2 bg-white shadow-sm"
-                      : "w-2 h-2 bg-white/50"
-                  }`}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Add photo — owner only */}
-        {isOwner && (
-          <div className="px-4 pt-3 pb-0.5">
-            <button
-              onClick={() => addPhotoRef.current?.click()}
-              disabled={addingPhoto}
-              className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-gray-300 rounded-2xl text-sm text-gray-500 font-medium active:bg-gray-50 disabled:opacity-50 transition-colors"
-            >
-              {addingPhoto ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                  <span>Adding photo…</span>
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4" />
-                  <span>Add photo</span>
-                </>
-              )}
-            </button>
-            <input
-              ref={addPhotoRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleAddPhoto}
-            />
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="px-4 pt-4 space-y-4">
-          {/* Title + owner controls */}
-          <div className="flex items-start justify-between gap-2">
-            <h1 className="text-2xl font-bold leading-tight flex-1">{dish.name}</h1>
-            {isOwner && (
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={handleOpenEdit}
-                  className="p-2 rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 transition-colors"
-                  title="Edit dish"
-                >
-                  <PenLine className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={handlePrivacyToggle}
-                  className="p-2 rounded-full bg-gray-100 text-gray-500 active:bg-gray-200 transition-colors"
-                  title={dish.isPrivate ? "Make public" : "Make private"}
-                >
-                  {dish.isPrivate ? <Lock className="h-4 w-4" /> : <Globe className="h-4 w-4" />}
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={deleteLoading}
-                  className="p-2 rounded-full bg-red-50 text-red-400 disabled:opacity-50 active:bg-red-100 transition-colors"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
+              <Avatar name={dish.creator.displayName} src={dish.creator.photoURL} size={20} />
+              {dish.creator.displayName}
+            </Link>
+            {dish.createdAt && <time dateTime={dish.createdAt}>{timeAgo(dish.createdAt)}</time>}
+            {dish.isPrivate && (
+              <span className="inline-flex items-center gap-1">
+                <Lock className="h-3.5 w-3.5" aria-hidden /> Private
+              </span>
             )}
           </div>
+        </div>
+        <ScoreStamp elo={dish.elo} size="lg" label="Group score" />
+      </div>
 
-          {/* Creator */}
-          {creator && (
-            <Link href={`/profile/${creator.handle}`} className="flex items-center gap-2 group w-fit">
-              <Avatar className="h-8 w-8 ring-2 ring-white">
-                <AvatarImage src={creator.photoURL} />
-                <AvatarFallback className="bg-orange-100 text-orange-600 text-xs">{creator.displayName?.[0]}</AvatarFallback>
-              </Avatar>
-              <div>
-                <p className="text-sm font-semibold group-hover:underline">{creator.displayName}</p>
-                <p className="text-[10px] text-gray-400">Creator</p>
-              </div>
-            </Link>
-          )}
+      <div className="-ml-2.5 mt-3 flex items-center">
+        <LikeButton dishId={dish.id} liked={v.liked} count={dish.likesCount} />
+        <SaveButton dishId={dish.id} saved={v.saved} />
+        <Button variant="ghost" size="icon" aria-label="Share" onClick={share}>
+          <Share2 className="h-5 w-5" aria-hidden />
+        </Button>
+        {v.isOwner && <OwnerTools dish={dish} onChanged={() => mutate()} />}
+      </div>
 
-          {/* Tagged people + edit button */}
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400">Tagged</span>
-              {isOwner && (
-                <button
-                  onClick={handleOpenTagEditor}
-                  className="p-1 rounded-full bg-gray-100 active:bg-gray-200 transition-colors"
-                >
-                  <Pencil className="h-3 w-3 text-gray-400" />
-                </button>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {taggedUsers.length === 0 && (
-                <span className="text-xs text-gray-300 italic">No one tagged</span>
-              )}
-              {taggedUsers.map((u) => {
-                // Check if this user has accepted (has a userDishes record)
-                const hasAccepted = !(u.uid === user?.uid && isTagPending);
-                return (
-                  <Link key={u.uid} href={`/profile/${u.handle}`}>
-                    <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 active:opacity-70 transition-opacity ${hasAccepted ? "bg-gray-100" : "bg-orange-50 border border-orange-200"}`}>
-                      <Avatar className="h-4 w-4">
-                        <AvatarImage src={u.photoURL} />
-                        <AvatarFallback className="text-[8px]">{u.displayName?.[0]}</AvatarFallback>
-                      </Avatar>
-                      <span className="text-xs font-medium">{u.displayName}</span>
-                      {!hasAccepted && <span className="text-[9px] text-orange-400 font-medium">pending</span>}
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Accept tag banner */}
-          {isTagPending && !isOwner && (
-            <div className="flex items-center justify-between bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3">
-              <div>
-                <p className="text-sm font-semibold text-orange-700">You've been tagged!</p>
-                <p className="text-xs text-orange-400 mt-0.5">Rate it to add this dish to your profile</p>
-              </div>
-              <button
-                onClick={() => setShowQuickRate(true)}
-                disabled={accepting}
-                className="flex items-center gap-1.5 bg-orange-500 text-white text-sm font-semibold rounded-full px-4 py-2 active:scale-95 transition-transform disabled:opacity-50"
-              >
-                <Check className="h-4 w-4" />
-                {accepting ? "Adding…" : "Rate & accept"}
-              </button>
-            </div>
-          )}
-
-          {dish.notes && (
-            <p className="text-gray-600 text-sm leading-relaxed">{dish.notes}</p>
-          )}
-
-          {dish.recipeLink && (
+      {(dish.notes || recipe) && (
+        <div className="mt-4 space-y-3">
+          {dish.notes && <p className="whitespace-pre-wrap text-[16px] leading-relaxed">{dish.notes}</p>}
+          {recipe && (
             <a
-              href={dish.recipeLink}
+              href={recipe}
               target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-orange-500 font-medium"
+              rel="noopener noreferrer nofollow"
+              className="inline-flex items-center gap-2 rounded-full bg-sunk px-4 py-2 text-sm font-medium hover:bg-line"
             >
-              <ExternalLink className="h-4 w-4" /> View recipe
+              <Link2 className="h-4 w-4" aria-hidden /> Recipe on {hostnameOf(recipe)}
+              <ExternalLink className="h-3.5 w-3.5 text-mute" aria-hidden />
             </a>
           )}
-
-          {/* Actions row */}
-          <div className="flex items-center gap-4 py-1">
-            <button onClick={handleLike} className="flex items-center gap-1.5 group">
-              <Heart className={`h-6 w-6 transition-all duration-150 ${liked ? "fill-red-500 text-red-500 scale-110" : "text-gray-400"}`} />
-            </button>
-            {likesCount > 0 ? (
-              <button onClick={handleOpenLikers} className="text-sm font-semibold text-gray-700 -ml-2 hover:underline">
-                {likesCount} like{likesCount !== 1 ? "s" : ""}
-              </button>
-            ) : null}
-            {canRerank && (
-              <button
-                onClick={handleRerank}
-                className="ml-auto flex items-center gap-1.5 text-xs text-gray-400 font-medium active:text-orange-500 transition-colors"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                Re-rank
-              </button>
-            )}
-          </div>
-
-          {dish.isPrivate && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-400">
-              <Lock className="h-3 w-3" /> Private — only visible to you
-            </div>
-          )}
-
-          <div className="h-px bg-gray-100" />
-
-          {/* Comments */}
-          <div id="comments" ref={commentsRef} className="space-y-3 pb-4">
-            <h2 className="font-bold text-base">
-              {comments.length > 0 ? `${comments.length} comment${comments.length !== 1 ? "s" : ""}` : "Comments"}
-            </h2>
-            {comments.length === 0 && (
-              <p className="text-sm text-gray-400">No comments yet. Be the first!</p>
-            )}
-            {comments.map((comment) => {
-              const commentUser = commentUsers[comment.userId];
-              const isMyComment = comment.userId === user?.uid;
-              return (
-                <div key={comment.id} className="flex gap-2.5 group">
-                  <Avatar className="h-7 w-7 shrink-0">
-                    <AvatarImage src={commentUser?.photoURL} />
-                    <AvatarFallback className="text-[10px]">{commentUser?.displayName?.[0] ?? "?"}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 flex items-start gap-1.5">
-                    <div className="bg-gray-50 rounded-2xl rounded-tl-none px-3 py-2 flex-1">
-                      <span className="text-xs font-semibold text-gray-700">{commentUser?.displayName ?? "User"} </span>
-                      <span className="text-sm text-gray-700">{comment.text}</span>
-                    </div>
-                    {isMyComment && (
-                      <button
-                        onClick={() => handleDeleteComment(comment.id!)}
-                        className="p-1.5 rounded-full text-gray-300 opacity-0 group-hover:opacity-100 active:opacity-100 active:text-red-400 transition-all mt-0.5 shrink-0"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            <form onSubmit={handleComment} className="flex gap-2 items-end pt-1">
-              <Avatar className="h-7 w-7 shrink-0">
-                <AvatarImage src={user?.photoURL ?? ""} />
-                <AvatarFallback className="text-[10px]">{user?.displayName?.[0] ?? "?"}</AvatarFallback>
-              </Avatar>
-              <div className="flex-1 flex gap-2 bg-gray-100 rounded-2xl px-3 py-2 items-center">
-                <input
-                  type="text"
-                  placeholder="Add a comment…"
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400"
-                />
-                <button
-                  type="submit"
-                  disabled={submitting || !commentText.trim()}
-                  className="text-orange-500 disabled:opacity-30 active:scale-90 transition-transform"
-                >
-                  <Send className="h-4 w-4" />
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
+      )}
+
+      <div className="mt-6">
+        <ParticipationPanel dish={dish} onChanged={() => mutate()} />
       </div>
-    </>
+
+      {others.length > 0 && (
+        <section className="mt-9" aria-labelledby="who-h">
+          <h2 id="who-h" className="mb-3 font-display text-xl font-bold">
+            {plural(others.length + 1, "cook")}
+          </h2>
+          <ul className="divide-y divide-line/60">
+            {dish.participants.map((p) => (
+              <li key={p.user.uid} className="flex items-center gap-3 py-2.5">
+                <Avatar name={p.user.displayName} src={p.user.photoURL} size={36} />
+                <div className="min-w-0 flex-1">
+                  <Link href={p.user.handle ? `/profile/${p.user.handle}` : "#"} className="block truncate text-[15px] font-semibold hover:underline">
+                    {p.user.displayName}
+                  </Link>
+                  <p className="text-sm text-mute">
+                    {p.status === "pending" ? "Hasn't answered yet" : p.role === "creator" ? "Made it" : p.role === "tagged" ? "Cooked it too" : "Tried it"}
+                  </p>
+                </div>
+                {p.elo !== null ? (
+                  <ScoreStamp elo={p.elo} size="sm" label={`${p.user.displayName}'s score`} />
+                ) : (
+                  <span className="text-sm text-mute">Pending</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <div className="mt-9">
+        <Comments
+          dishId={dish.id}
+          comments={dish.comments}
+          truncated={dish.commentsTruncated}
+          viewerUid={me?.uid}
+          isOwner={v.isOwner}
+          onChanged={() => mutate()}
+        />
+      </div>
+    </Shell>
   );
 }
