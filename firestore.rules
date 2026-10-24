@@ -1,10 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // The app server is the only reader and writer (via the Admin SDK, which
+    // bypasses these rules). Direct client access is denied entirely.
     match /{document=**} {
-      // Auth is handled by NextAuth — open access for now.
-      // TODO: lock down with Firebase Admin SDK custom tokens.
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

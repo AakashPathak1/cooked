@@ -1,49 +1,48 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
-import dynamic from "next/dynamic";
+import { Providers } from "@/components/providers";
 
-const inter = Inter({ subsets: ["latin"] });
-
-const ClientProviders = dynamic(
-  () => import("@/components/ClientProviders").then((m) => m.ClientProviders),
-  { ssr: false }
-);
+const display = localFont({
+  src: "./fonts/Bricolage.woff2",
+  variable: "--font-display",
+  weight: "200 800",
+  display: "swap",
+});
+const body = localFont({
+  src: "./fonts/InstrumentSans.woff2",
+  variable: "--font-body",
+  weight: "400 700",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Cooked",
-  description: "Rank your dishes with friends",
+  title: { default: "Cooked", template: "%s · Cooked" },
+  description: "Photograph what you cook, rank it against everything else you've made, and compare notes with friends.",
   manifest: "/manifest.json",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Cooked",
-  },
+  applicationName: "Cooked",
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "Cooked" },
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍳</text></svg>",
-    apple: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍳</text></svg>",
+    icon: [{ url: "/icons/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
   },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  themeColor: "#f97316",
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f4f4f0" },
+    { media: "(prefers-color-scheme: dark)", color: "#111215" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <head>
-        <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="Cooked" />
-      </head>
-      <body className={inter.className}>
-        <ClientProviders>{children}</ClientProviders>
+    <html lang="en" className={`${display.variable} ${body.variable}`}>
+      <body>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

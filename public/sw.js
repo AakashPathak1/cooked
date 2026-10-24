@@ -1,50 +1,42 @@
-// Cooked — Service Worker for Web Push Notifications
+// Cooked service worker: web push only. It deliberately does not cache pages,
+// so signed-in content is never served from a shared cache.
 
-self.addEventListener("install", (event) => {
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil(clients.claim());
-});
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 self.addEventListener("push", (event) => {
   if (!event.data) return;
-
   let data;
   try {
     data = event.data.json();
   } catch {
     data = { title: "Cooked", body: event.data.text() };
   }
-
-  const { title, body, url = "/notifications", icon } = data;
-
-  const options = {
-    body,
-    icon: icon || "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍳</text></svg>",
-    badge: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍳</text></svg>",
-    data: { url },
-    vibrate: [200, 100, 200],
-  };
-
-  event.waitUntil(self.registration.showNotification(title, options));
+  const title = typeof data.title === "string" ? data.title : "Cooked";
+  const url = typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/notifications";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: typeof data.body === "string" ? data.body : "",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/badge-96.png",
+      tag: typeof data.tag === "string" ? data.tag : undefined,
+      data: { url },
+    })
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url ?? "/notifications";
+  const target = new URL(event.notification.data?.url || "/notifications", self.location.origin).href;
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
-      for (const client of windowClients) {
-        if (client.url.includes(self.location.origin) && "focus" in client) {
-          client.navigate(url);
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      for (const client of windows) {
+        if (new URL(client.url).origin === self.location.origin && "focus" in client) {
+          client.navigate(target);
           return client.focus();
         }
       }
-      if (clients.openWindow) {
-        return clients.openWindow(url);
-      }
+      return self.clients.openWindow(target);
     })
   );
 });
