@@ -84,7 +84,7 @@ function assertSameOrigin(req: NextRequest) {
   if (req.headers.get("sec-fetch-site") === "cross-site") throw forbidden("Cross-site request blocked");
   const origin = req.headers.get("origin");
   if (!origin) return;
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const host = (req.headers.get("x-forwarded-host") ?? req.headers.get("host"))?.split(",")[0].trim();
   let originHost: string;
   try {
     originHost = new URL(origin).host;

@@ -17,6 +17,7 @@ import { ConfigError, loadServiceAccount } from "../config";
 import {
   DELETE_FIELD,
   chunk,
+  isValidDocId,
   type Batch,
   type DocData,
   type OrderBy,
@@ -177,11 +178,16 @@ export class AdminStore implements Store {
     options?: ReadOptions
   ): Promise<(StoredDoc | null)[]> {
     if (ids.length === 0) return [];
-    const refs = ids.map((id) => this.db.collection(collection).doc(id));
-    const snaps = options?.select
-      ? await this.db.getAll(...refs, { fieldMask: options.select })
-      : await this.db.getAll(...refs);
-    return snaps.map(decodeDoc);
+    const valid = ids.filter(isValidDocId);
+    const found = new Map<string, StoredDoc | null>();
+    if (valid.length > 0) {
+      const refs = valid.map((id) => this.db.collection(collection).doc(id));
+      const snaps = options?.select
+        ? await this.db.getAll(...refs, { fieldMask: options.select })
+        : await this.db.getAll(...refs);
+      snaps.forEach((snap) => found.set(snap.id, decodeDoc(snap)));
+    }
+    return ids.map((id) => found.get(id) ?? null);
   }
 
   async query(collection: string, query?: Query): Promise<StoredDoc[]> {
@@ -199,11 +205,16 @@ export class AdminStore implements Store {
     return db.runTransaction(async (t) => {
       const txGetMany = async (col: string, ids: string[], o?: ReadOptions) => {
         if (ids.length === 0) return [];
-        const refs = ids.map((id) => db.collection(col).doc(id));
-        const snaps = o?.select
-          ? await t.getAll(...refs, { fieldMask: o.select })
-          : await t.getAll(...refs);
-        return snaps.map(decodeDoc);
+        const valid = ids.filter(isValidDocId);
+        const found = new Map<string, StoredDoc | null>();
+        if (valid.length > 0) {
+          const refs = valid.map((id) => db.collection(col).doc(id));
+          const snaps = o?.select
+            ? await t.getAll(...refs, { fieldMask: o.select })
+            : await t.getAll(...refs);
+          snaps.forEach((snap) => found.set(snap.id, decodeDoc(snap)));
+        }
+        return ids.map((id) => found.get(id) ?? null);
       };
       const tx: Tx = {
         get: async (col, id, o) => {

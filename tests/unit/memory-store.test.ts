@@ -219,3 +219,11 @@ describe("composite index emulation", () => {
     await expect(s.query("x", { where: [{ field: "a", op: "==", value: 1 }, { field: "b", op: "==", value: 2 }] })).resolves.toEqual([]);
   });
 });
+
+describe("ids the Firestore SDK would reject", () => {
+  it("are treated as missing documents rather than throwing", async () => {
+    await seed("c", { a: { n: 1 } });
+    const rows = await store.getMany("c", ["", "..", "a/b", "__x__", "a"]);
+    expect(rows.map((r) => r?.id ?? null)).toEqual([null, null, null, null, "a"]);
+  });
+});

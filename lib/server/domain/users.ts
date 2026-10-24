@@ -114,7 +114,7 @@ export async function ensureUser(profile: Viewer): Promise<UserLite> {
 
       // Backfill the uniqueness claim for accounts created before handles
       // were reserved. If someone else already holds it, leave things alone.
-      if (user.handle && !claim) {
+      if (user.handle && isValidHandle(user.handle) && !claim) {
         tx.create(C.handles, user.handle, { uid: user.uid, createdAt: now() });
       }
       if (Object.keys(patch).length > 0) tx.update(C.users, user.uid, patch);
@@ -189,7 +189,13 @@ export async function getUsersOrPlaceholder(uids: Iterable<string>): Promise<Map
 }
 
 export async function getUserByHandle(rawHandle: string): Promise<UserRecord | null> {
-  const handle = decodeURIComponent(rawHandle).toLowerCase().replace(/^@/, "");
+  let decoded = rawHandle;
+  try {
+    decoded = decodeURIComponent(rawHandle);
+  } catch {
+    return null;
+  }
+  const handle = decoded.toLowerCase().replace(/^@/, "");
   if (!isValidHandle(handle)) return null;
   const store = getStore();
 
@@ -212,7 +218,8 @@ const USER_LIST_CAP = 500;
 /** Everyone, alphabetically. Capped; callers filter client-side. */
 export async function listUsers(limit = USER_LIST_CAP): Promise<UserLite[]> {
   const rows = await getStore().query(C.users, {
-    orderBy: [{ field: "displayName", dir: "asc" }],
+    // No orderBy: Firestore leaves out documents missing the ordered field,
+    // and older accounts may not have a displayName. Sort below instead.
     limit: Math.min(limit, USER_LIST_CAP),
     select: ["uid", "handle", "displayName", "photoURL"],
   });

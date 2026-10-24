@@ -1,6 +1,7 @@
 import {
   AlreadyExistsError,
   DELETE_FIELD,
+  isValidDocId,
   NotFoundError,
   type Batch,
   type DocData,
@@ -174,6 +175,7 @@ export class MemoryStore implements Store {
   }
 
   async get(col: string, id: string, options?: ReadOptions): Promise<StoredDoc | null> {
+    if (!isValidDocId(id)) return null;
     const data = this.cols.get(col)?.get(id);
     return data ? { id, data: project(clone(data), options?.select) } : null;
   }

@@ -108,6 +108,23 @@ export class NotFoundError extends Error {
 /** `in` queries are limited to 30 values by Firestore. */
 export const IN_QUERY_LIMIT = 30;
 
+/**
+ * Ids the Firestore SDK refuses to build a reference for (it throws rather
+ * than returning "not found"): empty, ".", "..", containing "/", or of the
+ * reserved `__name__` form. Treat them as missing documents instead.
+ */
+export function isValidDocId(id: unknown): id is string {
+  return (
+    typeof id === "string" &&
+    id.length > 0 &&
+    id.length <= 1500 &&
+    id !== "." &&
+    id !== ".." &&
+    !id.includes("/") &&
+    !/^__.*__$/.test(id)
+  );
+}
+
 export function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));

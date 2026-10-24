@@ -5,7 +5,7 @@ const csp = [
   // Next.js injects small inline bootstrap scripts; dev also needs eval for HMR.
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://lh3.googleusercontent.com",
+  "img-src 'self' data: blob: https://*.googleusercontent.com",
   "font-src 'self' data:",
   `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
   "worker-src 'self'",
@@ -30,7 +30,7 @@ const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   images: {
-    remotePatterns: [{ protocol: "https", hostname: "lh3.googleusercontent.com" }],
+    remotePatterns: [{ protocol: "https", hostname: "**.googleusercontent.com" }],
   },
   experimental: {
     // firebase-admin and web-push are server-only and must not be bundled.
