@@ -5,7 +5,8 @@ import { deleteDishCascade } from "./dishes";
 import { removeParticipants } from "./participation";
 import { C, memberId } from "./records";
 import { removeSubscription } from "./push";
-import { getUserRecord } from "./users";
+import { now } from "../clock";
+import { forgetEnsured, getUserRecord } from "./users";
 
 /**
  * Erase an account: the dishes they created go entirely (with everyone's
@@ -83,7 +84,9 @@ export async function deleteAccount(uid: string): Promise<void> {
     if (claim && claim.data.uid === uid) batch.delete(C.handles, user.handle);
   }
   batch.delete(C.users, uid);
+  batch.set(C.deletedUsers, uid, { deletedAt: now() });
   await batch.commit();
+  forgetEnsured(uid);
 
   await removeSubscription(uid);
 }

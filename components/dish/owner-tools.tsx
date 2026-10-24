@@ -14,6 +14,10 @@ import { errorMessage, request } from "@/lib/client/api";
 import { LIMITS } from "@/lib/schemas";
 import type { DishDetail } from "@/lib/types";
 
+/** Only people the owner actually tagged, not friends who tried the dish on their own. */
+const taggedIds = (dish: DishDetail) =>
+  dish.participants.filter((p) => p.role === "tagged").map((p) => p.user.uid);
+
 export function OwnerTools({ dish, onChanged }: { dish: DishDetail; onChanged: () => void }) {
   const toast = useToast();
   const router = useRouter();
@@ -25,7 +29,7 @@ export function OwnerTools({ dish, onChanged }: { dish: DishDetail; onChanged: (
   const [notes, setNotes] = useState(dish.notes);
   const [link, setLink] = useState(dish.recipeLink);
   const [priv, setPriv] = useState(dish.isPrivate);
-  const [tags, setTags] = useState(() => dish.participants.filter((p) => p.role !== "creator").map((p) => p.user.uid));
+  const [tags, setTags] = useState(() => taggedIds(dish));
   const [busy, setBusy] = useState(false);
 
   const refreshLists = () => void mutate((key) => typeof key === "string" && key.startsWith("/api/"), undefined, { revalidate: true });
@@ -34,7 +38,7 @@ export function OwnerTools({ dish, onChanged }: { dish: DishDetail; onChanged: (
     setNotes(dish.notes);
     setLink(dish.recipeLink);
     setPriv(dish.isPrivate);
-    setTags(dish.participants.filter((p) => p.role !== "creator").map((p) => p.user.uid));
+    setTags(taggedIds(dish));
     setMenu(false);
     setMode(m);
   };
@@ -54,7 +58,7 @@ export function OwnerTools({ dish, onChanged }: { dish: DishDetail; onChanged: (
     }
   }
 
-  const removedCount = dish.participants.filter((p) => p.role !== "creator" && !tags.includes(p.user.uid)).length;
+  const removedCount = taggedIds(dish).filter((uid) => !tags.includes(uid)).length;
 
   return (
     <>

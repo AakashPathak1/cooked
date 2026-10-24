@@ -10,7 +10,7 @@ export function usePaged<T>(endpoint: string) {
       if (previous && !previous.nextCursor) return null;
       return index === 0 ? endpoint : `${endpoint}?cursor=${encodeURIComponent(previous!.nextCursor!)}`;
     },
-    { revalidateFirstPage: true, revalidateOnFocus: false }
+    { revalidateFirstPage: false, revalidateOnFocus: false }
   );
   const items = data ? data.flatMap((p) => p.items) : [];
   const last = data?.[data.length - 1];

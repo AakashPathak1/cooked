@@ -2,6 +2,7 @@ import "server-only";
 
 import type { UserLite } from "@/lib/types";
 import { now } from "../clock";
+import { unauthorized } from "../errors";
 import { getStore, chunk } from "../store";
 import {
   C,
@@ -16,6 +17,8 @@ export interface Viewer {
   name: string | null;
   email: string | null;
   image: string | null;
+  /** When this session was created (ms). Sessions older than an account deletion are refused. */
+  signedInAt?: number;
 }
 
 const RESERVED_HANDLES = new Set([
@@ -209,6 +212,7 @@ const USER_LIST_CAP = 500;
 /** Everyone, alphabetically. Capped; callers filter client-side. */
 export async function listUsers(limit = USER_LIST_CAP): Promise<UserLite[]> {
   const rows = await getStore().query(C.users, {
+    orderBy: [{ field: "displayName", dir: "asc" }],
     limit: Math.min(limit, USER_LIST_CAP),
     select: ["uid", "handle", "displayName", "photoURL"],
   });
@@ -227,10 +231,19 @@ const ENSURE_TTL_MS = 10 * 60_000;
 export async function ensureUserCached(profile: Viewer): Promise<void> {
   const last = ensured.get(profile.uid);
   if (last && Date.now() - last < ENSURE_TTL_MS) return;
+  const tombstone = await getStore().get(C.deletedUsers, profile.uid);
+  const deletedAt = (tombstone?.data.deletedAt as Date | undefined)?.getTime();
+  if (deletedAt && deletedAt > (profile.signedInAt ?? 0)) {
+    throw unauthorized("This account was deleted. Sign in again to start fresh.");
+  }
   await ensureUser(profile);
   ensured.set(profile.uid, Date.now());
 }
 
 export function clearEnsureCache(): void {
   ensured.clear();
+}
+
+export function forgetEnsured(uid: string): void {
+  ensured.delete(uid);
 }

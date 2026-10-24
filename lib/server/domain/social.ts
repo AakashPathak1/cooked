@@ -20,13 +20,20 @@ async function actor(viewer: Viewer) {
   );
 }
 
+async function requireExisting(dishId: string) {
+  const dish = await loadDish(dishId);
+  if (!dish) throw notFound("Dish not found");
+  return dish;
+}
+
 /** Idempotent: liking twice leaves one like. */
 export async function setLike(
   viewer: Viewer,
   dishId: string,
   liked: boolean
 ): Promise<{ liked: boolean; likesCount: number }> {
-  const dish = await requireViewableDish(viewer.uid, dishId);
+  // Taking a like back must work even after losing access to the dish.
+  const dish = liked ? await requireViewableDish(viewer.uid, dishId) : await requireExisting(dishId);
   const id = memberId(viewer.uid, dishId);
 
   const result = await getStore().runTransaction(async (tx) => {
@@ -68,7 +75,7 @@ export async function setLike(
 }
 
 export async function setSaved(viewerUid: string, dishId: string, saved: boolean): Promise<void> {
-  await requireViewableDish(viewerUid, dishId);
+  if (saved) await requireViewableDish(viewerUid, dishId);
   const batch = getStore().batch();
   const id = memberId(viewerUid, dishId);
   if (saved) batch.set(C.saved, id, { userId: viewerUid, dishId, createdAt: now() });

@@ -65,6 +65,12 @@ export function errorResponse(error: unknown): NextResponse {
       { status: 503, headers: NO_STORE }
     );
   }
+  if ((error as { code?: number })?.code === 5) {
+    return NextResponse.json(
+      { error: { code: "not_found", message: "Not found" } },
+      { status: 404, headers: NO_STORE }
+    );
+  }
   console.error("[api] unhandled:", error);
   return NextResponse.json(
     { error: { code: "internal", message: "Something went wrong on our side. Please try again." } },

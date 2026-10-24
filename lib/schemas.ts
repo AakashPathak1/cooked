@@ -109,20 +109,38 @@ export const commentSchema = z.object({
 
 export const coverSchema = z.object({ logId: z.string().min(1).max(128) });
 
+const docId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, "Invalid id");
+
 export const rateSchema = z.object({
-  a: z.string().min(1).max(128),
-  b: z.string().min(1).max(128),
+  a: docId,
+  b: docId,
   result: z.enum(["a", "b", "tie"]),
-  focusId: z.string().min(1).max(128).optional(),
-  exclude: z.array(z.string().min(1).max(128)).max(50).default([]),
+  focusId: docId.optional(),
+  exclude: z.array(z.string().regex(/^[A-Za-z0-9_|-]{1,260}$/)).max(400).default([]),
 });
+
+/** Only the browser vendors' push services, so the server can't be aimed at arbitrary hosts. */
+const PUSH_HOSTS = [
+  /(^|\.)fcm\.googleapis\.com$/,
+  /(^|\.)push\.services\.mozilla\.com$/,
+  /(^|\.)push\.apple\.com$/,
+  /(^|\.)notify\.windows\.com$/,
+];
+export function isKnownPushService(endpoint: string): boolean {
+  try {
+    const u = new URL(endpoint);
+    return u.protocol === "https:" && !u.port && PUSH_HOSTS.some((re) => re.test(u.hostname));
+  } catch {
+    return false;
+  }
+}
 
 export const pushSubscriptionSchema = z.object({
   endpoint: z
     .string()
     .url()
     .max(1000)
-    .refine((v) => v.startsWith("https://"), { message: "Push endpoints must be https" }),
+    .refine(isKnownPushService, { message: "Unsupported push service" }),
   keys: z.object({
     p256dh: z.string().min(1).max(200),
     auth: z.string().min(1).max(100),

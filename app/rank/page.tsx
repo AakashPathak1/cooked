@@ -129,7 +129,7 @@ function Duel() {
         });
         const after = Object.fromEntries(res.changes.map((c) => [c.dishId, { before: c.before, after: c.after }]));
         setReveal({ verdict, after, next: res.next });
-        setExclude((cur) => [...cur, pairKey(pair.a.id, pair.b.id)]);
+        setExclude((cur) => [...cur, pairKey(pair.a.id, pair.b.id)].slice(-300));
         setCount((n) => n + 1);
         void mutate((k) => typeof k === "string" && (k.startsWith("/api/leaderboard") || k.startsWith("/api/profile")), undefined, { revalidate: true });
         timer.current = setTimeout(() => {
@@ -147,7 +147,7 @@ function Duel() {
 
   async function skip() {
     if (!pair) return;
-    const next = [...exclude, pairKey(pair.a.id, pair.b.id)];
+    const next = [...exclude, pairKey(pair.a.id, pair.b.id)].slice(-300);
     setExclude(next);
     setPair(undefined);
     await load(next);

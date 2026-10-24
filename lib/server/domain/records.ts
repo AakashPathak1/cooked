@@ -6,6 +6,8 @@ import type { StoredDoc } from "../store/types";
 export const C = {
   users: "users",
   handles: "handles",
+  /** One per deleted account; stops stale sessions from re-creating the profile. */
+  deletedUsers: "deletedUsers",
   dishes: "dishes",
   dishLogs: "dishLogs",
   userDishes: "userDishes",

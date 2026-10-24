@@ -44,10 +44,13 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user?.id && !token.sub) token.sub = user.id;
+      if (user) token.signedInAt = Date.now();
       return token;
     },
     session({ session, token }) {
       if (session.user && token.sub) (session.user as { id?: string }).id = token.sub;
+      (session as { signedInAt?: number }).signedInAt =
+        (token.signedInAt as number | undefined) ?? (token.iat ? Number(token.iat) * 1000 : 0);
       return session;
     },
   },
@@ -64,6 +67,7 @@ export async function getViewer(): Promise<Viewer | null> {
     name: user.name ?? null,
     email: user.email ?? null,
     image: user.image ?? null,
+    signedInAt: (session as { signedInAt?: number }).signedInAt,
   };
   await ensureUserCached(viewer);
   return viewer;

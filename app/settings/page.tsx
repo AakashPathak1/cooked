@@ -77,7 +77,11 @@ export default function SettingsPage() {
       </section>
 
       <section className="space-y-2">
-        <Button variant="outline" className="w-full justify-start" size="lg" onClick={() => signOut({ callbackUrl: "/signin" })}>
+        <Button variant="outline" className="w-full justify-start" size="lg" onClick={async () => {
+            // Stop this device receiving the account's notifications after sign-out.
+            if (push.state === "on") await push.disable().catch(() => {});
+            await signOut({ callbackUrl: "/signin" });
+          }}>
           <LogOut className="h-5 w-5" aria-hidden /> Sign out
         </Button>
         <Button variant="dangerSoft" className="w-full justify-start" size="lg" onClick={() => setDeleting(true)}>

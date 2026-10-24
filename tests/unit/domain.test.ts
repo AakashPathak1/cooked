@@ -365,3 +365,50 @@ describe("account deletion", () => {
     expect(after.elo).toBeCloseTo(QUICK_RATINGS.loved);
   });
 });
+
+describe("review regressions", () => {
+  it("a session that predates account deletion cannot re-create the profile", async () => {
+    const { ensureUserCached } = await import("@/lib/server/domain/users");
+    const old = { ...ann, signedInAt: Date.now() - 60_000 };
+    await deleteAccount("ann");
+    await rejects(ensureUserCached(old), 401);
+    expect(store.peek("users", "ann")).toBeUndefined();
+    // Signing in again afterwards works.
+    await ensureUserCached({ ...ann, signedInAt: Date.now() + 1000 });
+    expect(store.peek("users", "ann")).toBeDefined();
+  });
+
+  it("tag picker semantics: tried users are not tags, and un-tagging others leaves them alone", async () => {
+    const { id } = await createDish(ann, dishInput("Pie", { taggedUserIds: ["bob"] }));
+    await tryDish(cy, id, { ...photo, notes: "", quickRating: "good" });
+    await setTags(ann, id, ["bob"]); // what the fixed picker sends
+    const d = await getDishDetail("ann", id);
+    expect(d.participants.map((p) => p.user.uid).sort()).toEqual(["ann", "bob", "cy"]);
+  });
+
+  it("can take back a like after losing access to a private dish", async () => {
+    const { id } = await createDish(ann, dishInput("Stew", { taggedUserIds: ["bob"] }));
+    await acceptTag(bob, id, "good");
+    await setLike(bob, id, true);
+    await setTags(ann, id, []); // bob loses access
+    await setLike(bob, id, false);
+    expect(store.peek("dishes", id)!.likesCount).toBe(0);
+  });
+
+  it("only real push services are accepted", async () => {
+    const { isKnownPushService } = await import("@/lib/schemas");
+    expect(isKnownPushService("https://fcm.googleapis.com/fcm/send/abc")).toBe(true);
+    expect(isKnownPushService("https://updates.push.services.mozilla.com/wpush/v2/x")).toBe(true);
+    expect(isKnownPushService("https://web.push.apple.com/abc")).toBe(true);
+    expect(isKnownPushService("https://169.254.169.254/latest")).toBe(false);
+    expect(isKnownPushService("https://fcm.googleapis.com.evil.example/x")).toBe(false);
+    expect(isKnownPushService("http://fcm.googleapis.com/x")).toBe(false);
+  });
+
+  it("rate accepts long sessions of excluded pairs", async () => {
+    const { rateSchema } = await import("@/lib/schemas");
+    const exclude = Array.from({ length: 300 }, (_, i) => `a${i}|b${i}`);
+    expect(rateSchema.safeParse({ a: "x", b: "y", result: "a", exclude }).success).toBe(true);
+    expect(rateSchema.safeParse({ a: "x/../y", b: "y", result: "a" }).success).toBe(false);
+  });
+});
