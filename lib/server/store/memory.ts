@@ -13,6 +13,7 @@ import {
   type Where,
   type Writer,
 } from "./types";
+import { missingIndex, type IndexDef } from "./indexes";
 
 type Collection = Map<string, DocData>;
 
@@ -141,6 +142,20 @@ export class MemoryStore implements Store {
   private idCounter = 0;
   private txQueue: Promise<unknown> = Promise.resolve();
 
+  /**
+   * When provided, queries that real Firestore would reject for lack of a
+   * composite index throw instead of silently succeeding.
+   */
+  constructor(private readonly indexes?: IndexDef[]) {}
+
+  private checkIndex(col: string, query?: Query): void {
+    if (!this.indexes || !query) return;
+    const missing = missingIndex(col, query, this.indexes);
+    if (missing) {
+      throw new Error(`9 FAILED_PRECONDITION: The query requires an index (${missing}). Add it to firestore.indexes.json.`);
+    }
+  }
+
   /** Test helper: read raw document data without going through the API. */
   peek(col: string, id: string): DocData | undefined {
     const data = this.cols.get(col)?.get(id);
@@ -168,6 +183,7 @@ export class MemoryStore implements Store {
   }
 
   async query(col: string, query?: Query): Promise<StoredDoc[]> {
+    this.checkIndex(col, query);
     return runQuery(this.cols.get(col), query);
   }
 

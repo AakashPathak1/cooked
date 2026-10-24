@@ -29,6 +29,7 @@ import { search } from "@/lib/server/domain/search";
 import { addComment, deleteComment, setLike } from "@/lib/server/domain/social";
 import { ensureUser, clearEnsureCache, type Viewer } from "@/lib/server/domain/users";
 import { setPushTransport } from "@/lib/server/domain/push";
+import indexConfig from "@/firestore.indexes.json";
 
 const JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==";
 const photo = { photo: JPEG, thumb: JPEG, color: "#aa5533" };
@@ -60,7 +61,7 @@ async function rejects(p: Promise<unknown>, status: number) {
 }
 
 beforeEach(async () => {
-  store = new MemoryStore();
+  store = new MemoryStore(indexConfig.indexes);
   setStore(store);
   resetRateLimits();
   clearEnsureCache();

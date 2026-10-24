@@ -4,32 +4,70 @@
       "collectionGroup": "dishes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "isPrivate", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "isPrivate",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "dishes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "isPrivate", "order": "ASCENDING" },
-        { "fieldPath": "globalScore", "order": "DESCENDING" }
+        {
+          "fieldPath": "isPrivate",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "globalScore",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "comments",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "dishId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "dishId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "dishId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "notifications",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "toUid", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "toUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     }
   ],
