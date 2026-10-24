@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { QUICK_RATINGS } from "@/lib/elo";
 import { MemoryStore } from "./store/memory";
+import indexConfig from "@/firestore.indexes.json";
 
 const img = (name: string, thumb = false) =>
   `data:image/jpeg;base64,${readFileSync(
@@ -14,7 +15,7 @@ const DAY = 86_400_000;
 
 /** A small, believable data set: three friends, a handful of dishes, some activity. */
 export function createDemoStore(): MemoryStore {
-  const store = new MemoryStore();
+  const store = new MemoryStore(indexConfig.indexes);
   const t0 = Date.now();
   const b = store.batch();
 

@@ -38,12 +38,18 @@ const COMMENT_WINDOW = 50;
 
 // ─── Feed & leaderboard ──────────────────────────────────────────────────────
 
+/** A [number, id] cursor, or null (treated as page one) for anything else. */
+function validCursor(raw: string | null | undefined) {
+  const cur = decodeCursor(raw);
+  return cur && cur.length >= 2 && typeof cur[0] === "number" && typeof cur[1] === "string" ? cur : null;
+}
+
 export async function getFeed(
   viewerUid: string,
   cursor?: string | null,
   limit = FEED_PAGE_SIZE
 ): Promise<Paged<DishSummary>> {
-  const cur = decodeCursor(cursor);
+  const cur = validCursor(cursor);
   const rows = await getStore().query(C.dishes, {
     where: [{ field: "isPrivate", op: "==", value: false }],
     orderBy: [{ field: "createdAt", dir: "desc" }],
@@ -68,7 +74,7 @@ export async function getLeaderboard(
   cursor?: string | null,
   limit = LEADERBOARD_PAGE_SIZE
 ): Promise<Paged<DishSummary>> {
-  const cur = decodeCursor(cursor);
+  const cur = validCursor(cursor);
   const rows = await getStore().query(C.dishes, {
     where: [{ field: "isPrivate", op: "==", value: false }],
     orderBy: [{ field: "globalScore", dir: "desc" }],

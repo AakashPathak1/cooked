@@ -13,17 +13,19 @@ export interface ImageBytes {
   etag: string;
 }
 
-const DATA_URL = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/;
+const DATA_URL = /^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/]+={0,2})$/;
 
 /** Decode a stored data URL. Anything that isn't a plain raster image is rejected. */
 export function decodeDataUrl(value: unknown): ImageBytes | null {
   if (typeof value !== "string") return null;
-  const match = DATA_URL.exec(value);
+  // Older uploads can carry line breaks inside the base64 payload.
+  const match = DATA_URL.exec(value.replace(/\s+/g, ""));
   if (!match) return null;
   const bytes = Buffer.from(match[2], "base64");
   if (bytes.length === 0) return null;
   const etag = createHash("sha1").update(bytes).digest("base64url").slice(0, 20);
-  return { bytes, mime: match[1] as ImageBytes["mime"], etag: `"${etag}"` };
+  const mime = (match[1] === "image/jpg" ? "image/jpeg" : match[1]) as ImageBytes["mime"];
+  return { bytes, mime, etag: `"${etag}"` };
 }
 
 /** One photo, with the same visibility rules as the dish it belongs to. */

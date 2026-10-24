@@ -197,3 +197,33 @@ describe("field projection", () => {
     expect(rows[0].data).toEqual({ name: "x", n: 1 });
   });
 });
+
+describe("composite index emulation", () => {
+  const indexes = [
+    { collectionGroup: "comments", fields: [{ fieldPath: "dishId", order: "ASCENDING" as const }, { fieldPath: "createdAt", order: "DESCENDING" as const }] },
+  ];
+
+  it("rejects an equality + orderBy query with no matching composite index", async () => {
+    const s = new MemoryStore(indexes);
+    await expect(
+      s.query("comments", { where: [{ field: "dishId", op: "==", value: "d" }], orderBy: [{ field: "createdAt", dir: "asc" }] })
+    ).rejects.toThrow(/requires an index/);
+    await expect(
+      s.query("comments", { where: [{ field: "dishId", op: "==", value: "d" }], orderBy: [{ field: "createdAt", dir: "desc" }] })
+    ).resolves.toEqual([]);
+  });
+
+  it("serves single-field and equality-only queries without a composite index", async () => {
+    const s = new MemoryStore([]);
+    await expect(s.query("x", { orderBy: [{ field: "a", dir: "desc" }] })).resolves.toEqual([]);
+    await expect(s.query("x", { where: [{ field: "a", op: "==", value: 1 }, { field: "b", op: "==", value: 2 }] })).resolves.toEqual([]);
+  });
+});
+
+describe("ids the Firestore SDK would reject", () => {
+  it("are treated as missing documents rather than throwing", async () => {
+    await seed("c", { a: { n: 1 } });
+    const rows = await store.getMany("c", ["", "..", "a/b", "__x__", "a"]);
+    expect(rows.map((r) => r?.id ?? null)).toEqual([null, null, null, null, "a"]);
+  });
+});

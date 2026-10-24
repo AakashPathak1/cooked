@@ -27,6 +27,7 @@ import { POST as postComment } from "@/app/api/dishes/[id]/comments/route";
 import { GET as getCover } from "@/app/api/dishes/[id]/cover/route";
 import { GET as getFeed } from "@/app/api/feed/route";
 import { DELETE as deleteAccount } from "@/app/api/account/route";
+import indexConfig from "@/firestore.indexes.json";
 
 const JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==";
 const base = "http://localhost:3000";
@@ -41,7 +42,7 @@ function req(method: string, path: string, body?: unknown, headers: Record<strin
 const newDish = { name: "Ramen", photo: JPEG, thumb: JPEG, quickRating: "good" };
 
 beforeEach(async () => {
-  setStore(new MemoryStore());
+  setStore(new MemoryStore(indexConfig.indexes));
   resetRateLimits();
   clearEnsureCache();
   setPushTransport(async () => {});

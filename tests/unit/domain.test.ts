@@ -22,13 +22,14 @@ import {
   setTags,
   tryDish,
 } from "@/lib/server/domain/participation";
-import { getCoverBytes, getPhotoBytes } from "@/lib/server/domain/photos";
+import { decodeDataUrl, getCoverBytes, getPhotoBytes } from "@/lib/server/domain/photos";
 import { getProfile } from "@/lib/server/domain/profile";
 import { recordDuel } from "@/lib/server/domain/ratings";
 import { search } from "@/lib/server/domain/search";
 import { addComment, deleteComment, setLike } from "@/lib/server/domain/social";
-import { ensureUser, clearEnsureCache, type Viewer } from "@/lib/server/domain/users";
+import { ensureUser, clearEnsureCache, getUserByHandle, listUsers, type Viewer } from "@/lib/server/domain/users";
 import { setPushTransport } from "@/lib/server/domain/push";
+import indexConfig from "@/firestore.indexes.json";
 
 const JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==";
 const photo = { photo: JPEG, thumb: JPEG, color: "#aa5533" };
@@ -60,7 +61,7 @@ async function rejects(p: Promise<unknown>, status: number) {
 }
 
 beforeEach(async () => {
-  store = new MemoryStore();
+  store = new MemoryStore(indexConfig.indexes);
   setStore(store);
   resetRateLimits();
   clearEnsureCache();
@@ -410,5 +411,21 @@ describe("review regressions", () => {
     const exclude = Array.from({ length: 300 }, (_, i) => `a${i}|b${i}`);
     expect(rateSchema.safeParse({ a: "x", b: "y", result: "a", exclude }).success).toBe(true);
     expect(rateSchema.safeParse({ a: "x/../y", b: "y", result: "a" }).success).toBe(false);
+  });
+});
+
+describe("legacy data tolerance", () => {
+  it("lists users who have no displayName and survives a malformed handle in the URL", async () => {
+    const b = store.batch();
+    b.set("users", "legacy", { uid: "legacy", handle: "oldtimer", photoURL: "" });
+    await b.commit();
+    const list = await listUsers();
+    expect(list.map((u) => u.handle)).toContain("oldtimer");
+    expect(await getUserByHandle("%E0%A4%A")).toBeNull();
+  });
+
+  it("accepts image/jpg data URLs and base64 with line breaks", () => {
+    const img = decodeDataUrl("data:image/jpg;base64,/9j/4AAQ\nSkZJRg==");
+    expect(img?.mime).toBe("image/jpeg");
   });
 });

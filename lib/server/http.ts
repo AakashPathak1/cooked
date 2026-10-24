@@ -72,8 +72,18 @@ export function errorResponse(error: unknown): NextResponse {
     );
   }
   console.error("[api] unhandled:", error);
+  // Database errors carry a gRPC status ("9 FAILED_PRECONDITION: ..."). Passing
+  // a short form back makes production problems diagnosable from the browser.
+  const raw = error instanceof Error ? error.message : "";
+  const detail = typeof (error as { code?: unknown })?.code === "number" ? raw.slice(0, 300) : undefined;
   return NextResponse.json(
-    { error: { code: "internal", message: "Something went wrong on our side. Please try again." } },
+    {
+      error: {
+        code: "internal",
+        message: "Something went wrong on our side. Please try again.",
+        ...(detail ? { detail } : {}),
+      },
+    },
     { status: 500, headers: NO_STORE }
   );
 }
@@ -84,7 +94,7 @@ function assertSameOrigin(req: NextRequest) {
   if (req.headers.get("sec-fetch-site") === "cross-site") throw forbidden("Cross-site request blocked");
   const origin = req.headers.get("origin");
   if (!origin) return;
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const host = (req.headers.get("x-forwarded-host") ?? req.headers.get("host"))?.split(",")[0].trim();
   let originHost: string;
   try {
     originHost = new URL(origin).host;
