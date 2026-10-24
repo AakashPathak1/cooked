@@ -72,8 +72,18 @@ export function errorResponse(error: unknown): NextResponse {
     );
   }
   console.error("[api] unhandled:", error);
+  // Database errors carry a gRPC status ("9 FAILED_PRECONDITION: ..."). Passing
+  // a short form back makes production problems diagnosable from the browser.
+  const raw = error instanceof Error ? error.message : "";
+  const detail = typeof (error as { code?: unknown })?.code === "number" ? raw.slice(0, 300) : undefined;
   return NextResponse.json(
-    { error: { code: "internal", message: "Something went wrong on our side. Please try again." } },
+    {
+      error: {
+        code: "internal",
+        message: "Something went wrong on our side. Please try again.",
+        ...(detail ? { detail } : {}),
+      },
+    },
     { status: 500, headers: NO_STORE }
   );
 }
